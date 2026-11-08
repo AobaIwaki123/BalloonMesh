@@ -25,9 +25,25 @@ server/                         ASP.NET Core
   Hubs/                         SignalR
   Views/Home.svelte             SvelteSharp Client モードの UI
 
-third_party/SvelteSharp/        actbit/SvelteSharp (GitHub から取得)
+third_party/SvelteSharp/        git submodule (actbit/SvelteSharp, commit pinned)
 docs/decisions.md               未確定事項に対する今回の暫定決定
 ```
+
+### SvelteSharp サブモジュール
+
+SvelteSharp は git submodule として登録されています。初回取得時は再帰 clone してください。
+
+```powershell
+git clone --recurse-submodules <repository-url>
+```
+
+既に clone 済みの場合は:
+
+```powershell
+git submodule update --init --recursive
+```
+
+現在のピン留め commit は `9852875a1a21ce1d12c43144b60e498f00f9005c` です。サーバのプロジェクト参照は `third_party/SvelteSharp/` を直接参照します。
 
 ---
 
