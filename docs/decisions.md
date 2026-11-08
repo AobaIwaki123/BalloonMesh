@@ -156,13 +156,18 @@ Arduino を維持する場合の推奨確認手順:
 - Gateway の HTTPS 接続（CA 未設定時はピン留めなし）
 - サーバ再起動時の queued 予約再投入
 - 基準局座標の更新 API（PUT /api/anchors/{id}）
+- 個体別 Provisioning UUID（Bluetooth MAC 由来）
+- Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT、Group 0xC005）
+- Gateway の NVS オフラインスプール（128 件、再接続後に再送）
+- Gateway 共有トークン認証（hello / X-Gateway-Token）
+- UI の Gateway 状態（prov/unprov、spool 件数、transport）
 
 ## 14. 未実装 / 今後の課題
 
 - `LED_EFFECT_NOW` / `LED_FLOW_NOW`
 - Mesh Relay の選択的 ON/OFF、LPN/Friend 構成
-- Provisioning / 鍵配布 / Gateway 認証
+- BLE Mesh Provisioner 実装 / 鍵配布 / model bind / group subscribe の自動化
 - Protocol C の ACK・再送・TLS 証明書検証
 - 複数 Gateway 同時送信時の帯域・衝突評価
 - 50 台実機での 100ms 同期精度・電力試験
-- 音楽タイムライン編集
+- 初回 Wi-Fi 資格情報設定（SmartConfig / BLE Wi-Fi provisioning）`n- 音楽タイムライン編集

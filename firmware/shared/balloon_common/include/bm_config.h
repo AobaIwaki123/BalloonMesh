@@ -17,6 +17,7 @@
 #define BM_GROUP_NEIGHBOR_REPORT 0xC002u
 #define BM_GROUP_QUEUE_STATUS 0xC003u
 #define BM_GROUP_NEIGHBOR_PROBE 0xC004u
+#define BM_GROUP_TIME 0xC005u
 #define BM_GROUP_LED_ALL 0xC010u
 #define BM_GROUP_LED_ZONE_BASE 0xC100u
 #define BM_GROUP_LED_ZONE_COUNT 16u
@@ -59,6 +60,9 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
 #define BM_GPS_BAUD 9600
 
 /* Gateway configuration (override with -D in platformio.ini). */
+#ifndef BM_GATEWAY_TOKEN
+#define BM_GATEWAY_TOKEN ""
+#endif
 #ifndef BM_GATEWAY_ID
 #define BM_GATEWAY_ID "gw-01"
 #endif

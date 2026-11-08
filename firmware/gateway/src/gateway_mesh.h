@@ -3,9 +3,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -29,7 +26,6 @@ bool bm_gateway_mesh_send(uint16_t dst,
                           uint8_t ttl,
                           const uint8_t *payload,
                           uint16_t length);
-QueueHandle_t bm_gateway_mesh_event_queue(void);
 
 #ifdef __cplusplus
 }

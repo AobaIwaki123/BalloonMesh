@@ -36,7 +36,9 @@ public sealed record GatewayDto(
     string? Remote,
     string? Firmware,
     DateTimeOffset LastSeen,
-    int PendingCommands);
+    int PendingCommands,
+    bool Provisioned,
+    int SpoolPending);
 
 public sealed record GroupDto(int Id, string Name, ushort MeshGroupAddress, int BalloonCount);
 
@@ -113,7 +115,9 @@ public sealed record GatewayEventDto(
 public sealed record GatewayEventsRequest(
     string GatewayId,
     string? Firmware,
-    IReadOnlyList<GatewayEventDto> Events);
+    IReadOnlyList<GatewayEventDto> Events,
+    bool? Provisioned = null,
+    int? SpoolPending = null);
 
 public sealed record GatewayCommandDto(ushort Dst, uint Opcode, string Payload, int Ttl);
 

@@ -214,6 +214,16 @@ static void make_nmea(const char *body, char *out, size_t size) {
     snprintf(out, size, "$%s*%02X", body, checksum);
 }
 
+static void test_time_codec(void) {
+    uint8_t buffer[8];
+    int64_t value = 1762560000123LL;
+    TEST_ASSERT_EQUAL_UINT(8, bm_encode_time_report(buffer, sizeof(buffer), value));
+    int64_t decoded = 0;
+    TEST_ASSERT_TRUE(bm_decode_time_report(buffer, sizeof(buffer), &decoded));
+    TEST_ASSERT_EQUAL_INT64(value, decoded);
+    TEST_ASSERT_FALSE(bm_decode_time_report(buffer, 7, &decoded));
+}
+
 static void test_nmea_parser(void) {
     bm_nmea_state_t state;
     bm_nmea_init(&state);
@@ -276,6 +286,7 @@ int main(void) {
     RUN_TEST(test_forward_resync_discards_without_executing);
     RUN_TEST(test_queue_snapshot_roundtrip);
     RUN_TEST(test_queue_monitor_hysteresis);
+    RUN_TEST(test_time_codec);
     RUN_TEST(test_nmea_parser);
     RUN_TEST(test_neighbor_median_and_top10);
     return UNITY_END();

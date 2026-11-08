@@ -6,8 +6,6 @@
 #include "esp_bt_main.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 
 #include "esp_ble_mesh_common_api.h"
 #include "esp_ble_mesh_config_model_api.h"
@@ -19,13 +17,14 @@
 
 #include "balloon_protocol.h"
 #include "bm_config.h"
+#include "bm_device_id.h"
+#include "gateway_spool.h"
 
 static const char *TAG = "gateway-mesh";
 
-static uint8_t s_prov_uuid[16] = BM_PROV_UUID;
+static uint8_t s_prov_uuid[16];
 static bool s_provisioned;
 static uint16_t s_primary_addr;
-static QueueHandle_t s_event_queue;
 
 static esp_ble_mesh_cfg_srv_t s_config_server = {
     .net_transmit = ESP_BLE_MESH_TRANSMIT(2, 20),
@@ -137,9 +136,7 @@ static void custom_model_cb(esp_ble_mesh_model_cb_event_t event,
     if (mesh_event.length > 0) {
         memcpy(mesh_event.payload, param->model_operation.msg, mesh_event.length);
     }
-    if (s_event_queue != NULL) {
-        xQueueSend(s_event_queue, &mesh_event, 0);
-    }
+    bm_gateway_spool_add(&mesh_event);
 }
 
 void bm_gateway_mesh_init(void) {
@@ -148,8 +145,8 @@ void bm_gateway_mesh_init(void) {
     ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
     ESP_ERROR_CHECK(esp_bluedroid_init());
     ESP_ERROR_CHECK(esp_bluedroid_enable());
+    bm_device_uuid(s_prov_uuid);
 
-    s_event_queue = xQueueCreate(32, sizeof(bm_gateway_event_t));
     ESP_ERROR_CHECK(esp_ble_mesh_register_prov_callback(prov_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_config_server_callback(config_server_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_health_server_callback(health_server_cb));
@@ -198,8 +195,4 @@ bool bm_gateway_mesh_send(uint16_t dst,
         return false;
     }
     return true;
-}
-
-QueueHandle_t bm_gateway_mesh_event_queue(void) {
-    return s_event_queue;
 }

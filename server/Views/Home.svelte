@@ -36,6 +36,8 @@
     firmware: string | null;
     lastSeen: string;
     pendingCommands: number;
+    provisioned: boolean;
+    spoolPending: number;
   };
   type Group = { id: number; name: string; meshGroupAddress: number; balloonCount: number };
   type HistorySample = { lat: number; lon: number; confidence: number; method: string };
@@ -95,6 +97,7 @@
     })
   );
   const onlineCount = $derived(balloons.filter((balloon) => balloon.online).length);
+  const provisionedGateways = $derived(gateways.filter((gateway) => gateway.provisioned).length);
 
   function addLog(message: string) {
     const now = new Date().toLocaleTimeString();
@@ -333,6 +336,12 @@
         layers: [{ id: 'osm', type: 'raster', source: 'osm' }]
       }
     });
+    // Markers can be attached before the style finishes loading.  This keeps
+    // the initial fleet visible even when the raster tile request is slow.
+    mapReady = true;
+    syncMarkers();
+    syncAnchors();
+
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'bottom-left');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
@@ -653,6 +662,7 @@
       <div class="stat"><strong>{onlineCount}</strong><span>online</span></div>
       <div class="stat"><strong>{gateways.length}</strong><span>gateways</span></div>
       <div class="stat"><strong>{anchors.length}</strong><span>anchors</span></div>
+      <div class="stat"><strong>{provisionedGateways}/{gateways.length}</strong><span>provisioned</span></div>
       <div class:good={signalConnected} class:bad={!signalConnected} class="stat link">
         <strong>{signalConnected ? 'LIVE' : 'POLL'}</strong><span>{statusLine}</span>
       </div>
@@ -852,7 +862,9 @@
             <li>
               <span class:good={gateway.webSocket} class:bad={!gateway.webSocket} class="dot"></span>
               <strong>{gateway.id}</strong>
-              <small>{gateway.webSocket ? 'WebSocket' : 'HTTP poll'} · {gateway.pendingCommands} pending</small>
+              <span class="show-status" class:queued={gateway.provisioned}
+                    class:canceled={!gateway.provisioned}>{gateway.provisioned ? 'prov' : 'unprov'}</span>
+              <small>{gateway.webSocket ? 'WS' : 'HTTP'} · {gateway.pendingCommands} cmd · {gateway.spoolPending} spool</small>
             </li>
           {/each}
         </ul>

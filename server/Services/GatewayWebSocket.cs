@@ -15,6 +15,7 @@ public static class GatewayWebSocket
         GatewayRegistry registry,
         MeshReportRouter router,
         ILogger logger,
+        string? expectedToken,
         CancellationToken cancellationToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
@@ -38,9 +39,27 @@ public static class GatewayWebSocket
                 }
                 var remote = root.TryGetProperty("name", out var name) ? name.GetString() : null;
                 var firmware = root.TryGetProperty("firmware", out var version) ? version.GetString() : null;
+                var token = root.TryGetProperty("token", out var tokenValue) ? tokenValue.GetString() : null;
+                var provisioned = root.TryGetProperty("provisioned", out var provValue) &&
+                                  provValue.ValueKind == JsonValueKind.True;
+                var spoolPending = root.TryGetProperty("spoolPending", out var spoolValue) &&
+                                   spoolValue.TryGetInt32(out var spoolCount)
+                    ? spoolCount
+                    : 0;
+                if (!GatewayAuth.Matches(token, expectedToken))
+                {
+                    await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation,
+                        "invalid gateway token", linked.Token);
+                    return;
+                }
                 if (!string.IsNullOrWhiteSpace(gatewayId))
                 {
                     registry.AttachWebSocket(gatewayId, remote ?? context.Connection.RemoteIpAddress?.ToString(), firmware);
+                    if (registry.GetOrRegister(gatewayId) is { } attachedClient)
+                    {
+                        attachedClient.Provisioned = provisioned;
+                        attachedClient.SpoolPending = spoolPending;
+                    }
                 }
             }
 

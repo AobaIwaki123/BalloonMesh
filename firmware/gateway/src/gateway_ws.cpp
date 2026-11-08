@@ -10,11 +10,11 @@
 #include "esp_log.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
 
 #include "bm_config.h"
 #include "gateway_mesh.h"
+#include "gateway_spool.h"
 
 #if defined(BM_GATEWAY_USE_WEBSOCKET) && BM_GATEWAY_USE_WEBSOCKET
 
@@ -78,10 +78,13 @@ static void build_uri(void) {
 }
 
 static void send_hello(void) {
-    char hello[192];
+    char hello[256];
     snprintf(hello, sizeof(hello),
-             "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\"}",
-             BM_GATEWAY_ID, BM_FIRMWARE_VERSION);
+             "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
+             "\"token\":\"%s\",\"provisioned\":%s,\"spoolPending\":%u}",
+             BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
+             bm_gateway_mesh_is_provisioned() ? "true" : "false",
+             (unsigned)bm_gateway_spool_count());
     esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
                                    pdMS_TO_TICKS(3000));
 }
@@ -155,18 +158,14 @@ static void websocket_event_handler(void *arg, esp_event_base_t base, int32_t id
 
 static void ws_sender_task(void *argument) {
     (void)argument;
-    QueueHandle_t queue = bm_gateway_mesh_event_queue();
-    if (queue == NULL) {
-        vTaskDelete(NULL);
-        return;
-    }
     for (;;) {
         if (!s_connected || s_client == NULL) {
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
         bm_gateway_event_t event;
-        if (xQueueReceive(queue, &event, pdMS_TO_TICKS(200)) != pdTRUE) {
+        if (!bm_gateway_spool_peek(0, &event)) {
+            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
         char hex[17];
@@ -181,7 +180,9 @@ static void ws_sender_task(void *argument) {
             int sent = esp_websocket_client_send_text(s_client, json, length,
                                                       pdMS_TO_TICKS(3000));
             if (sent < 0) {
-                ESP_LOGW(TAG, "send failed");
+                ESP_LOGW(TAG, "send failed; retaining event");
+            } else {
+                bm_gateway_spool_drop(1);
             }
         }
     }

@@ -9,6 +9,7 @@
 #include "balloon_mesh.h"
 #include "balloon_neighbor_link.h"
 #include "balloon_positioning.h"
+#include "balloon_time_link.h"
 #include "bm_config.h"
 
 static const char *TAG = "balloon";
@@ -29,6 +30,7 @@ void setup() {
     bm_led_output_init();
     bm_led_controller_init(bm_balloon_mesh_publish_queue_status);
     bm_neighbor_link_init();
+    bm_time_link_init();
     bm_balloon_mesh_init();
     bm_positioning_start();
 }

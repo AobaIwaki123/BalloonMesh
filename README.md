@@ -89,7 +89,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、13 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、15 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 
@@ -100,7 +100,7 @@ cd firmware/tests
 pio test -e native
 ```
 
-（12 tests）
+（13 tests）
 
 ### 4. ファームウェア
 
@@ -179,6 +179,11 @@ pio run -t upload
 - デモシミュレーション（2 Gateway 相当の重複報告を含む）
 - ゾーン作成・バルーン移動・空グループ削除の API / UI
 - 予約一覧と LED_CANCEL 連携のキャンセル
+- 個体別 Provisioning UUID（Bluetooth MAC 由来）
+- 基準局が使えない場合の Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT）
+- Gateway の NVS オフラインスプール（128 件、再接続後に再送）
+- Gateway 共有トークン認証（`Gateway:Token` / `X-Gateway-Token`）
+- UI の Gateway 状態（prov/unprov、spool 件数、transport）
 
 ### SvelteSharp Client モード
 
@@ -207,6 +212,8 @@ pio run -t upload
 | NEIGHBOR_REQUEST | `0x08`, 0B |
 | NEIGHBOR_PROBE | `0x09`, 0B |
 | NEIGHBOR_REPORT | `0x0A`, 8B（2 件/パケット） |
+| TIME_REQUEST | `0x0B`, 0B（Mesh 時刻フォールバック） |
+| TIME_REPORT | `0x0C`, 8B（UTC ms、LE） |
 
 Group Address:
 
@@ -216,6 +223,7 @@ Group Address:
 | 近隣報告 | `0xC002` |
 | キュー状態 | `0xC003` |
 | 近隣 PROBE | `0xC004` |
+| Mesh 時刻フォールバック | `0xC005` |
 | 全バルーン LED | `0xC010` |
 | Zone A〜 | `0xC100`〜 |
 
@@ -245,7 +253,7 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 - `positions` — 測位履歴（UI には測定時刻を表示しない）
 - `show_steps` — 予約コマンドの履歴
 
-接続文字列は `ConnectionStrings:BalloonMesh`、テスト用スキーマは `Data:Schema` で指定します。
+接続文字列は `ConnectionStrings:BalloonMesh`、テスト用スキーマは `Data:Schema` で指定します。Gateway:Token を設定すると Gateway の WebSocket hello / HTTP ヘッダ（`X-Gateway-Token`）が一致しない接続を拒否します。
 
 ---
 
@@ -261,4 +269,4 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 5. **LED_CANCEL の tombstone** は 64 件のリングバッファです。大量のキャンセルを長時間保持する要件がある場合は拡張が必要です。
 6. **デモシミュレーション** はサーバ内で FTM 報告を合成します。実機 Gateway がない状態でも UI と集約ロジックを確認できますが、電波・Mesh の実特性は再現しません。
 7. **UI の CDN 依存**  MapLibre GL JS と SignalR ブラウザクライアントは CDN から遅延ロードします。閉域網ではこれらのファイルを `wwwroot` 等に配置し、`Home.svelte` の URL を差し替えてください。
-8. **認証**  Protocol A は 8B 共有トークンのみ、Gateway は CA 未設定時に `setInsecure()` の HTTPS または平文 HTTP です。本番では TLS 証明書検証 / トークンローテーション / 署名付きコマンドを追加してください。
+8. **認証**  Gateway の共有トークン認証（`Gateway:Token`）は実装済みです。Protocol A は 8B 共有トークンのみ、WSS は CA 未設定時に証明書ピン留めなしです。本番では TLS 証明書検証 / トークンローテーション / 署名付きコマンドを追加してください。

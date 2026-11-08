@@ -24,6 +24,8 @@ public sealed class GatewayClient
     public bool WebSocketConnected { get; set; }
     public string? Remote { get; set; }
     public string? Firmware { get; set; }
+    public bool Provisioned { get; set; }
+    public int SpoolPending { get; set; }
     public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
     public int PendingCommands => Commands.Reader.CanCount ? Commands.Reader.Count : 0;
 }
@@ -131,7 +133,9 @@ public sealed class GatewayRegistry
                 client.Remote,
                 client.Firmware,
                 client.LastSeen,
-                client.PendingCommands))
+                client.PendingCommands,
+                client.Provisioned,
+                client.SpoolPending))
             .ToArray();
 
     public async Task NotifyChangedAsync()

@@ -8,12 +8,12 @@
 #include "cJSON.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
 #include "bm_config.h"
 #include "gateway_mesh.h"
+#include "gateway_spool.h"
 #include "gateway_ws.h"
 
 static const char *TAG = "gateway";
@@ -86,11 +86,6 @@ static bool server_available(void) {
 
 static void upload_events_task(void *argument) {
     (void)argument;
-    QueueHandle_t queue = bm_gateway_mesh_event_queue();
-    if (queue == NULL) {
-        vTaskDelete(NULL);
-        return;
-    }
     GatewayHttpClient transport;
     for (;;) {
         if (!server_available()) {
@@ -98,8 +93,10 @@ static void upload_events_task(void *argument) {
             continue;
         }
         bm_gateway_event_t events[12];
-        uint8_t count = 0;
-        while (count < 12 && xQueueReceive(queue, &events[count], 0) == pdTRUE) {
+        uint16_t count = 0;
+        uint16_t available = bm_gateway_spool_count();
+        while (count < 12 && count < available &&
+               bm_gateway_spool_peek((uint16_t)count, &events[count])) {
             count++;
         }
         if (count == 0) {
@@ -114,9 +111,12 @@ static void upload_events_task(void *argument) {
             continue;
         }
         int written = snprintf(body, capacity,
-                               "{\"gatewayId\":\"%s\",\"firmware\":\"%s\",\"events\":[",
-                               BM_GATEWAY_ID, BM_FIRMWARE_VERSION);
-        for (uint8_t i = 0; i < count; ++i) {
+                               "{\"gatewayId\":\"%s\",\"firmware\":\"%s\","
+                               "\"provisioned\":%s,\"spoolPending\":%u,\"events\":[",
+                               BM_GATEWAY_ID, BM_FIRMWARE_VERSION,
+                               bm_gateway_mesh_is_provisioned() ? "true" : "false",
+                               (unsigned)bm_gateway_spool_count());
+        for (uint16_t i = 0; i < count; ++i) {
             char hex[17];
             hex_encode(events[i].payload, events[i].length, hex, sizeof(hex));
             written += snprintf(body + written, capacity - (size_t)written,
@@ -140,9 +140,15 @@ static void upload_events_task(void *argument) {
         http.setTimeout(5000);
         if (http.begin(transport.client(), url)) {
             http.addHeader("Content-Type", "application/json");
+            if (strlen(BM_GATEWAY_TOKEN) > 0) {
+                http.addHeader("X-Gateway-Token", BM_GATEWAY_TOKEN);
+            }
             int code = http.POST((uint8_t *)body, strlen(body));
-            if (code < 200 || code >= 300) {
-                ESP_LOGW(TAG, "upload failed HTTP %d", code);
+            if (code >= 200 && code < 300) {
+                bm_gateway_spool_drop(count);
+            } else {
+                ESP_LOGW(TAG, "upload failed HTTP %d; retaining %u events",
+                         code, (unsigned)count);
                 vTaskDelay(pdMS_TO_TICKS(500));
             }
             http.end();
@@ -170,6 +176,9 @@ static void poll_commands_task(void *argument) {
         if (!http.begin(transport.client(), url)) {
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
+        }
+        if (strlen(BM_GATEWAY_TOKEN) > 0) {
+            http.addHeader("X-Gateway-Token", BM_GATEWAY_TOKEN);
         }
         int code = http.GET();
         if (code == 200) {
@@ -254,6 +263,7 @@ void setup() {
     }
     ESP_ERROR_CHECK(err);
 
+    bm_gateway_spool_init();
     bm_gateway_mesh_init();
     xTaskCreate(wifi_task, "gateway_wifi", 4096, NULL, 5, NULL);
 #if defined(BM_GATEWAY_USE_WEBSOCKET) && BM_GATEWAY_USE_WEBSOCKET

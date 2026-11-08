@@ -221,3 +221,26 @@ bool bm_decode_neighbor_report(const uint8_t *data, size_t len, bm_neighbor_repo
     }
     return true;
 }
+
+size_t bm_encode_time_report(uint8_t *out, size_t out_len, int64_t utc_ms) {
+    if (out == NULL || out_len < 8) {
+        return 0;
+    }
+    uint64_t value = (uint64_t)utc_ms;
+    for (int i = 0; i < 8; ++i) {
+        out[i] = (uint8_t)((value >> (8 * i)) & 0xFFu);
+    }
+    return 8;
+}
+
+bool bm_decode_time_report(const uint8_t *data, size_t len, int64_t *utc_ms) {
+    if (data == NULL || utc_ms == NULL || len != 8) {
+        return false;
+    }
+    uint64_t value = 0;
+    for (int i = 0; i < 8; ++i) {
+        value |= ((uint64_t)data[i]) << (8 * i);
+    }
+    *utc_ms = (int64_t)value;
+    return true;
+}

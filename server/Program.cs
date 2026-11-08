@@ -69,6 +69,7 @@ app.Map("/ws/gateway", async context =>
     var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
         .CreateLogger("GatewayWebSocket");
     await GatewayWebSocket.HandleAsync(socket, context, registry, router, logger,
+        GatewayAuth.ConfiguredToken(context.RequestServices.GetRequiredService<IConfiguration>()),
         context.RequestAborted);
 });
 
@@ -265,9 +266,23 @@ app.MapPost("/api/demo/stop", async (SimulationService simulation, CancellationT
 });
 
 app.MapPost("/api/gateway/{id}/events",
-    (string id, GatewayEventsRequest request, GatewayRegistry registry, MeshReportRouter router) =>
+    (HttpContext http, string id, GatewayEventsRequest request, GatewayRegistry registry,
+        MeshReportRouter router, IConfiguration configuration) =>
     {
+        if (!GatewayAuth.IsAuthorized(http, configuration))
+        {
+            return Results.Unauthorized();
+        }
         registry.Touch(id, request.Firmware);
+        var client = registry.GetOrRegister(id, request.Firmware);
+        if (request.Provisioned is { } provisioned)
+        {
+            client.Provisioned = provisioned;
+        }
+        if (request.SpoolPending is { } spoolPending)
+        {
+            client.SpoolPending = spoolPending;
+        }
         var accepted = 0;
         foreach (var message in request.Events)
         {
@@ -277,8 +292,13 @@ app.MapPost("/api/gateway/{id}/events",
     });
 
 app.MapGet("/api/gateway/{id}/commands",
-    async (string id, int? waitMs, GatewayRegistry registry, CancellationToken cancellationToken) =>
+    async (HttpContext http, string id, int? waitMs, GatewayRegistry registry,
+        IConfiguration configuration, CancellationToken cancellationToken) =>
     {
+        if (!GatewayAuth.IsAuthorized(http, configuration))
+        {
+            return Results.Unauthorized();
+        }
         registry.Touch(id);
         var wait = Math.Clamp(waitMs ?? 10_000, 0, 30_000);
         var first = await registry.ReadCommandAsync(id, wait, cancellationToken);

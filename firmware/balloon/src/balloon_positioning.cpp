@@ -20,6 +20,7 @@
 #include "balloon_mesh.h"
 #include "balloon_neighbor_link.h"
 #include "balloon_protocol.h"
+#include "balloon_time_link.h"
 #include "bm_anchor_protocol.h"
 #include "bm_config.h"
 
@@ -189,6 +190,11 @@ static void positioning_task(void *argument) {
         uint8_t valid_count = 0;
         for (size_t i = 0; i < sizeof(BM_ANCHORS) / sizeof(BM_ANCHORS[0]); ++i) {
             measure_anchor(&BM_ANCHORS[i], batch_id, &valid_count);
+        }
+
+        if (!bm_clock_is_synced()) {
+            bm_time_link_request();
+            vTaskDelay(pdMS_TO_TICKS(3000));
         }
 
         if (valid_count <= 2) {

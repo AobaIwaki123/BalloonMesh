@@ -35,6 +35,8 @@ extern "C" {
 #define BM_OP_NEIGHBOR_REQUEST 0x08u
 #define BM_OP_NEIGHBOR_PROBE 0x09u
 #define BM_OP_NEIGHBOR_REPORT 0x0Au
+#define BM_OP_TIME_REQUEST 0x0Bu
+#define BM_OP_TIME_REPORT 0x0Cu
 
 /* 24-bit Mesh vendor opcode.  This matches ESP-IDF's
  * ESP_BLE_MESH_MODEL_OP_3(op, company_id) representation. */
@@ -127,6 +129,10 @@ bool bm_decode_neighbor_report(const uint8_t *data, size_t len, bm_neighbor_repo
 
 /* True when a <= b in the wrapping 32-bit FTM timestamp domain. */
 bool bm_timestamp_is_older_or_equal(uint32_t a, uint32_t b);
+
+/* Mesh fallback time report: 64-bit UTC milliseconds, little-endian. */
+size_t bm_encode_time_report(uint8_t *out, size_t out_len, int64_t utc_ms);
+bool bm_decode_time_report(const uint8_t *data, size_t len, int64_t *utc_ms);
 
 #ifdef __cplusplus
 }

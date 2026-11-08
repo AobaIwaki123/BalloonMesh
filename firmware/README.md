@@ -60,6 +60,14 @@ pio test -e native
 - `bm_config.h` の `BM_GATEWAY_ID` / `BM_SERVER_URL` / Wi-Fi 設定
 - WSS/HTTPS の CA は `-DBM_TLS_CA_CERT=\"...\"` で指定
 
+## 追加実装
+
+- Provisioning UUID は Bluetooth MAC から個体別に生成
+- 基準局が使えない場合、Mesh ピアへ `TIME_REQUEST` を送り、最初の `TIME_REPORT` で時計を補正
+- Gateway は未送信 Mesh イベントを NVS に最大 128 件保持し、WebSocket/HTTP 再接続後に再送
+- Gateway は `BM_GATEWAY_TOKEN` を hello / `X-Gateway-Token` ヘッダで送信
+- サーバ側 `Gateway:Token` と一致しない接続は拒否
+
 ## Arduino BLE Mesh の注意
 
 Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` が無効な sdkconfig でビルドされています。`balloon` / `gateway` はヘッダ構造体を有効化するため `-DCONFIG_BLE_MESH_NODE=1` を付けていますが、実機 Provisioning はプリビルド構成に依存します。詳細は `../docs/decisions.md` を参照してください。

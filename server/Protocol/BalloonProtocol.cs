@@ -21,11 +21,14 @@ public static class BalloonProtocol
     public const byte OpNeighborRequest = 0x08;
     public const byte OpNeighborProbe = 0x09;
     public const byte OpNeighborReport = 0x0A;
+    public const byte OpTimeRequest = 0x0B;
+    public const byte OpTimeReport = 0x0C;
 
     public const ushort GroupFtmReport = 0xC001;
     public const ushort GroupNeighborReport = 0xC002;
     public const ushort GroupQueueStatus = 0xC003;
     public const ushort GroupNeighborProbe = 0xC004;
+    public const ushort GroupTime = 0xC005;
     public const ushort GroupLedAll = 0xC010;
     public const ushort GroupLedZoneBase = 0xC100;
 

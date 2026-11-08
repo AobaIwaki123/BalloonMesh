@@ -17,11 +17,13 @@
 #include "balloon_led_controller.h"
 #include "balloon_neighbor_link.h"
 #include "balloon_protocol.h"
+#include "balloon_time_link.h"
 #include "bm_config.h"
+#include "bm_device_id.h"
 
 static const char *TAG = "balloon-mesh";
 
-static uint8_t s_prov_uuid[16] = BM_PROV_UUID;
+static uint8_t s_prov_uuid[16];
 static bool s_provisioned;
 static uint16_t s_primary_addr;
 
@@ -46,6 +48,8 @@ static esp_ble_mesh_model_op_t s_control_ops[] = {
     ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_LED_RESET_AND_SET), 8),
     ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_NEIGHBOR_REQUEST), 0),
     ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_NEIGHBOR_PROBE), 0),
+    ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_TIME_REQUEST), 0),
+    ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_TIME_REPORT), 8),
     ESP_BLE_MESH_MODEL_OP_END,
 };
 
@@ -82,11 +86,12 @@ static void subscribe_control_groups(void) {
     if (addr == ESP_BLE_MESH_ADDR_UNASSIGNED) {
         return;
     }
-    uint16_t groups[3 + BM_GROUP_LED_ZONE_COUNT];
+    uint16_t groups[4 + BM_GROUP_LED_ZONE_COUNT];
     size_t count = 0;
     groups[count++] = BM_GROUP_LED_ALL;
     groups[count++] = BM_GROUP_NEIGHBOR_PROBE;
     groups[count++] = BM_GROUP_NEIGHBOR_REPORT;
+    groups[count++] = BM_GROUP_TIME;
     for (uint16_t i = 0; i < BM_GROUP_LED_ZONE_COUNT; ++i) {
         groups[count++] = (uint16_t)(BM_GROUP_LED_ZONE_BASE + i);
     }
@@ -148,6 +153,14 @@ static void custom_model_cb(esp_ble_mesh_model_cb_event_t event,
         bm_neighbor_link_on_probe(ctx->addr, ctx->recv_rssi, ctx->recv_ttl);
         return;
     }
+    if (opcode == BM_VENDOR_OPCODE(BM_OP_TIME_REQUEST)) {
+        bm_time_link_on_request();
+        return;
+    }
+    if (opcode == BM_VENDOR_OPCODE(BM_OP_TIME_REPORT)) {
+        bm_time_link_on_report(data, length);
+        return;
+    }
     bm_led_controller_handle_opcode(opcode, data, length);
 }
 
@@ -157,6 +170,7 @@ void bm_balloon_mesh_init(void) {
     ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
     ESP_ERROR_CHECK(esp_bluedroid_init());
     ESP_ERROR_CHECK(esp_bluedroid_enable());
+    bm_device_uuid(s_prov_uuid);
 
     ESP_ERROR_CHECK(esp_ble_mesh_register_prov_callback(prov_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_config_server_callback(config_server_cb));
