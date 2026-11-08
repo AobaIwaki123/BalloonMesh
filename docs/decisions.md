@@ -161,6 +161,9 @@ Arduino を維持する場合の推奨確認手順:
 - Gateway の NVS オフラインスプール（128 件、再接続後に再送）
 - Gateway 共有トークン認証（hello / X-Gateway-Token）
 - UI の Gateway 状態（prov/unprov、spool 件数、transport）
+- Cookie + OIDC / Discord 認証
+- Viewer / Operator / Admin のロールポリシー
+- Admin 専用 MOCK オンボーディング UI / API / SignalR
 
 ## 14. 未実装 / 今後の課題
 
@@ -170,4 +173,6 @@ Arduino を維持する場合の推奨確認手順:
 - Protocol C の ACK・再送・TLS 証明書検証
 - 複数 Gateway 同時送信時の帯域・衝突評価
 - 50 台実機での 100ms 同期精度・電力試験
-- 初回 Wi-Fi 資格情報設定（SmartConfig / BLE Wi-Fi provisioning）`n- 音楽タイムライン編集
+- 初回 Wi-Fi 資格情報設定（SmartConfig / BLE Wi-Fi provisioning）
+- 実機 BLE Mesh Provisioner（MOCK UI のみ実装）
+- 音楽タイムライン編集
