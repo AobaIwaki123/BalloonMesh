@@ -42,6 +42,16 @@ cd tests
 pio test -e native
 ```
 
+## RGB LED（balloon）
+
+balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 8bit** で初期化します。
+
+- balloon: LED キュー / 現在色
+- anchor / gateway: RGB LED なし（LED 制御は行いません）
+
+実装: `shared/balloon_common/src/bm_led_output.c`  
+設定: `shared/balloon_common/include/bm_config.h`
+
 ## 設定
 
 ### balloon

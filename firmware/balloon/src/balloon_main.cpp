@@ -5,7 +5,7 @@
 
 #include "balloon_clock.h"
 #include "balloon_led_controller.h"
-#include "balloon_led_output.h"
+#include "bm_led_output.h"
 #include "balloon_mesh.h"
 #include "balloon_neighbor_link.h"
 #include "balloon_positioning.h"
