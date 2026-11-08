@@ -1,0 +1,9 @@
+{
+  "name": "balloon_common",
+  "version": "0.1.0",
+  "description": "Shared ESP32 configuration and Protocol A anchor data codec",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include"
+  }
+}

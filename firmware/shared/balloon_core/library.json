@@ -1,0 +1,9 @@
+{
+  "name": "balloon_core",
+  "version": "0.1.0",
+  "description": "Transport-independent BalloonMesh protocol, LED queue and NMEA logic",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "include"
+  }
+}

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>BalloonMesh.Server</RootNamespace>
+    <AssemblyName>BalloonMesh.Server</AssemblyName>
+    <SvelteSharpBuildTaskAssembly>$(MSBuildThisFileDirectory)..\third_party\SvelteSharp\SvelteSharp.Build\bin\$(Configuration)\net10.0\SvelteSharp.Build.dll</SvelteSharpBuildTaskAssembly>
+    <SvelteSharpViewsPath>$(MSBuildThisFileDirectory)Views</SvelteSharpViewsPath>
+    <SvelteSharpToolchainPath>$(MSBuildThisFileDirectory)tools\svelte</SvelteSharpToolchainPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The test project lives below this directory; keep it out of the web app. -->
+    <Compile Remove="BalloonMesh.Server.Tests\**\*.cs" />
+    <Content Remove="BalloonMesh.Server.Tests\**" />
+    <None Remove="BalloonMesh.Server.Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Core\SvelteSharp.Core.csproj" />
+    <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Jint\SvelteSharp.Jint.csproj" />
+    <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Build\SvelteSharp.Build.csproj" />
+    <PackageReference Include="Npgsql" Version="10.0.0" />
+  </ItemGroup>
+
+  <!-- SvelteSharp ships this target in its NuGet package; the repository sample
+       imports it directly when using project references. -->
+  <Import Project="..\third_party\SvelteSharp\SvelteSharp.Build\buildTransitive\SvelteSharp.Build.targets" />
+
+</Project>

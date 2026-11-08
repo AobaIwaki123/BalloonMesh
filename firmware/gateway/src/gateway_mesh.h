@@ -1,0 +1,36 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    uint16_t src;
+    uint16_t dst;
+    uint32_t opcode;
+    uint8_t length;
+    uint8_t payload[8];
+    int8_t rssi;
+    uint8_t ttl;
+    uint32_t received_ms;
+} bm_gateway_event_t;
+
+void bm_gateway_mesh_init(void);
+bool bm_gateway_mesh_is_provisioned(void);
+uint16_t bm_gateway_mesh_primary_addr(void);
+bool bm_gateway_mesh_send(uint16_t dst,
+                          uint32_t opcode,
+                          uint8_t ttl,
+                          const uint8_t *payload,
+                          uint16_t length);
+QueueHandle_t bm_gateway_mesh_event_queue(void);
+
+#ifdef __cplusplus
+}
+#endif

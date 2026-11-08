@@ -1,0 +1,102 @@
+using BalloonMesh.Server.Models;
+using BalloonMesh.Server.Protocol;
+using BalloonMesh.Server.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace BalloonMesh.Server.Tests;
+
+[Collection("PostgresDatabase")]
+public sealed class LedDispatchTests
+{
+    [Fact]
+    public async Task ScheduledReservationWaitsForAGateway()
+    {
+        using var database = new TemporaryDatabase();
+        var fleet = new FleetService(database.Store);
+        var events = new RecordingMonitorEvents();
+        var time = new TestTimeProvider(new DateTimeOffset(2026, 11, 8, 10, 0, 0, TimeSpan.Zero));
+        var registry = new GatewayRegistry(events);
+        var dispatch = new LedDispatchService(
+            registry, fleet, database.Store, events, time, NullLogger<LedDispatchService>.Instance);
+        var target = fleet.ResolveTarget("all", "all");
+        var executeAt = time.GetUtcNow().AddMinutes(2);
+        var tick = BalloonProtocol.Tick40FromUnixMs(executeAt.ToUnixTimeMilliseconds());
+
+        Assert.True(dispatch.EnqueueScheduled(target, tick, executeAt, 10, 20, 30));
+        Assert.Equal(1, dispatch.PendingCount);
+        Assert.Equal(0, await dispatch.TickAsync());
+        Assert.Equal(1, dispatch.PendingCount);
+
+        var first = dispatch.NextIssuedTick([0x0101]);
+        var second = dispatch.NextIssuedTick([0x0101]);
+        Assert.True(second > first);
+        var cutoff = dispatch.NextCutoffTick([0x0101], 10);
+        var laterCutoff = dispatch.NextCutoffTick([0x0101], 10);
+        Assert.True(laterCutoff > cutoff);
+    }
+
+    [Fact]
+    public async Task CommandServiceAcceptsCommandsWithoutGateways()
+    {
+        using var database = new TemporaryDatabase();
+        var fleet = new FleetService(database.Store);
+        var events = new RecordingMonitorEvents();
+        var time = new TestTimeProvider(new DateTimeOffset(2026, 11, 8, 10, 0, 0, TimeSpan.Zero));
+        var registry = new GatewayRegistry(events);
+        var dispatch = new LedDispatchService(
+            registry, fleet, database.Store, events, time, NullLogger<LedDispatchService>.Instance);
+        var commands = new CommandService(
+            fleet, dispatch, registry, database.Store, events, time,
+            NullLogger<CommandService>.Instance);
+
+        var now = await commands.SetNowAsync(new LedNowRequest("all", "all", 1, 2, 3), default);
+        Assert.True(now.Accepted);
+        Assert.Equal(0, now.Gateways);
+
+        var scheduled = await commands.ScheduleAsync(
+            new LedSetRequest("all", "all", time.GetUtcNow().AddMinutes(2), 4, 5, 6), default);
+        Assert.True(scheduled.Accepted);
+        Assert.NotNull(scheduled.Payload);
+        Assert.Equal(16, scheduled.Payload!.Length); // 8 bytes in hex
+
+        var reset = await commands.ResetAsync(
+            new LedResetRequest("all", "all", null, true, 7, 8, 9), default);
+        Assert.True(reset.Accepted);
+        Assert.NotNull(reset.Payload);
+        Assert.Equal(16, reset.Payload!.Length);
+
+        var showSteps = database.Store.GetShowSteps(10);
+        Assert.Single(showSteps);
+
+        var recoveryDispatch = new LedDispatchService(
+            registry, fleet, database.Store, events, time, NullLogger<LedDispatchService>.Instance);
+        var recovery = new ShowRecoveryWorker(
+            database.Store, fleet, recoveryDispatch, time, NullLogger<ShowRecoveryWorker>.Instance);
+        Assert.Equal(1, await recovery.RecoverAsync());
+        Assert.Equal(1, recoveryDispatch.PendingCount);
+
+        var cancelled = await commands.CancelShowStepAsync(showSteps[0].Id, default);
+        Assert.NotNull(cancelled);
+        Assert.Equal("canceled", database.Store.GetShowStep(showSteps[0].Id)!.Status);
+    }
+
+    [Fact]
+    public void GroupsCanBeCreatedAssignedAndDeletedWhenEmpty()
+    {
+        using var database = new TemporaryDatabase();
+        var fleet = new FleetService(database.Store);
+
+        var created = fleet.CreateGroup("Zone E");
+        Assert.Equal((ushort)0xC104, created.MeshGroupAddress);
+        Assert.Equal(0, created.BalloonCount);
+
+        var moved = fleet.AssignBalloonToGroup(0x0101, created.Id);
+        Assert.Equal(created.Id, moved.GroupId);
+        Assert.Equal("Zone E", moved.GroupName);
+        Assert.False(fleet.DeleteGroup(created.Id));
+
+        fleet.AssignBalloonToGroup(0x0101, 1);
+        Assert.True(fleet.DeleteGroup(created.Id));
+        Assert.False(fleet.DeleteGroup(5)); // virtual all-balloons group
+    }
+}

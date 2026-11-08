@@ -1,0 +1,27 @@
+# Build outputs
+bin/
+obj/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# PlatformIO
+.pio/
+firmware/.pio/
+
+# SvelteSharp restored toolchain and generated artifacts
+server/tools/svelte/
+third_party/SvelteSharp/tools/svelte/
+third_party/SvelteSharp/**/tools/svelte/
+third_party/SvelteSharp/**/bin/
+third_party/SvelteSharp/**/obj/
+
+
+# Local leftovers / test output
+*.db
+*.db-shm
+*.db-wal
+TestResults/
+*.log
