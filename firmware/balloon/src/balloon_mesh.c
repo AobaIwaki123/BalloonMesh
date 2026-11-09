@@ -117,6 +117,10 @@ static void subscribe_control_groups(void) {
 static void prov_cb(esp_ble_mesh_prov_cb_event_t event,
                     esp_ble_mesh_prov_cb_param_t *param) {
     switch (event) {
+        case ESP_BLE_MESH_NODE_PROV_ENABLE_COMP_EVT:
+            ESP_LOGI(TAG, "provisioning enabled (err=%d)",
+                     param->node_prov_enable_comp.err_code);
+            break;
         case ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT:
             s_provisioned = true;
             s_primary_addr = esp_ble_mesh_get_primary_element_address();
