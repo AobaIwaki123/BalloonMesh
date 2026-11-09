@@ -254,6 +254,7 @@ static void wifi_task(void *argument) {
 void setup() {
     Serial.begin(115200);
     delay(200);
+    esp_log_level_set("*", ESP_LOG_INFO);
     ESP_LOGI(TAG, "BalloonMesh gateway %s firmware %s", BM_GATEWAY_ID,
              BM_FIRMWARE_VERSION);
 

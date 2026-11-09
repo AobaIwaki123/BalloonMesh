@@ -19,6 +19,7 @@ static const char *TAG = "balloon";
 void setup() {
     Serial.begin(115200);
     delay(200);
+    esp_log_level_set("*", ESP_LOG_INFO);
     ESP_LOGI(TAG, "BalloonMesh balloon firmware %s", BM_FIRMWARE_VERSION);
 
     esp_err_t err = nvs_flash_init();
