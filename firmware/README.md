@@ -49,6 +49,7 @@ pio test -e native
   - 基準局 SSID / UDP ポート / トークン
   - LED GPIO
   - Group Address / Model ID / Company ID
+- `BM_ENABLE_POSITIONING` は既定値 `0`。BLE Meshの実機立ち上げ時はWi-Fi/FTMを起動せず、Mesh初期化だけを検証する。Protocol A/FTMを検証するときは `1` にする。
 
 ### anchor
 - `platformio.ini` の `-DBM_ANCHOR_ID=N`

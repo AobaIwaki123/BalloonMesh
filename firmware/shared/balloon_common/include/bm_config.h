@@ -5,6 +5,12 @@
 
 #define BM_FIRMWARE_VERSION "0.1.0"
 
+/* Keep the balloon bring-up independent from Wi-Fi while validating BLE Mesh.
+ * Set to 1 when Protocol A / FTM positioning is ready to be exercised. */
+#ifndef BM_ENABLE_POSITIONING
+#define BM_ENABLE_POSITIONING 0
+#endif
+
 /* Bluetooth Mesh addressing.  Production deployments should provision these
  * values rather than compiling them in. */
 #define BM_COMPANY_ID_LOCAL 0x02E5u

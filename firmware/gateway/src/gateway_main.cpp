@@ -229,7 +229,8 @@ static void wifi_task(void *argument) {
     (void)argument;
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);
+    /* BLE and Wi-Fi coexistence requires Wi-Fi modem sleep on ESP32-C3. */
+    WiFi.setSleep(true);
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
             ESP_LOGI(TAG, "connecting Wi-Fi SSID=%s", BM_GATEWAY_WIFI_SSID);
