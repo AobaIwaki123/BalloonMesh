@@ -81,3 +81,7 @@ balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 8bit** �
 ## Arduino BLE Mesh の注意
 
 Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` が無効な sdkconfig でビルドされています。`balloon` / `gateway` はヘッダ構造体を有効化するため `-DCONFIG_BLE_MESH_NODE=1` を付けていますが、実機 Provisioning はプリビルド構成に依存します。詳細は `../docs/decisions.md` を参照してください。
+
+## Mesh 宛先の変更
+
+全体向けのメッセージは共通グループ `0xC010` を使い、個別指示は端末のユニキャストアドレスに送ります。ゾーン別の Mesh 宛先は使用しません。バルーン、ゲートウェイ、サーバーは同じバージョンへ更新してください。旧ファームウェアとの混在中は時刻同期やテレメトリが届かない場合があります。既存のゾーン宛て予約は自動的に全体へ変換されず、再作成が必要です。

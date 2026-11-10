@@ -78,17 +78,16 @@ static void subscribe_telemetry_groups(void) {
     if (addr == ESP_BLE_MESH_ADDR_UNASSIGNED) {
         return;
     }
-    const uint16_t groups[] = {
-        BM_GROUP_FTM_REPORT,
-        BM_GROUP_NEIGHBOR_REPORT,
-        BM_GROUP_QUEUE_STATUS,
-    };
-    for (size_t i = 0; i < sizeof(groups) / sizeof(groups[0]); ++i) {
-        esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
-            addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY, groups[i]);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "subscribe 0x%04x: %s", groups[i], esp_err_to_name(err));
-        }
+    /* Free slots occupied by subscriptions from older firmware. */
+    const uint16_t legacy_groups[] = { 0xC001u, 0xC002u, 0xC003u };
+    for (size_t i = 0; i < sizeof(legacy_groups) / sizeof(legacy_groups[0]); ++i) {
+        (void)esp_ble_mesh_model_unsubscribe_group_addr(
+            addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY, legacy_groups[i]);
+    }
+    esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
+        addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY, BM_GROUP_ALL);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "subscribe 0x%04x: %s", BM_GROUP_ALL, esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "gateway mesh primary address 0x%04x", addr);
 }
@@ -103,6 +102,11 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event,
     } else if (event == ESP_BLE_MESH_NODE_PROV_RESET_EVT) {
         s_provisioned = false;
         s_primary_addr = ESP_BLE_MESH_ADDR_UNASSIGNED;
+        esp_err_t err = esp_ble_mesh_node_prov_enable(
+            (esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "restart provisioning failed: %s", esp_err_to_name(err));
+        }
     }
 }
 

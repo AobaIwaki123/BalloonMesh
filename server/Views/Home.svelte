@@ -70,8 +70,7 @@
   let simulationRunning = $state(false);
   let selectedAddress = $state<number | null>(null);
   let search = $state('');
-  let targetMode = $state<'balloon' | 'group' | 'all'>('balloon');
-  let targetGroup = $state<number>(1);
+  let targetMode = $state<'balloon' | 'all'>('balloon');
   let colorHex = $state('#38bdf8');
   let executeLocal = $state('');
   let pickMode = $state(false);
@@ -84,8 +83,6 @@
   let selectedHistory = $state<HistorySample[]>([]);
   let showSteps = $state<ShowStep[]>([]);
   let onboarding = $state<MockDevice[]>([]);
-  let newGroupName = $state('');
-  let moveGroupId = $state(1);
   let busy = $state(false);
 
   let map: any = null;
@@ -103,8 +100,7 @@
     balloons.filter((balloon) => {
       const query = search.trim().toLowerCase();
       return !query || balloon.name.toLowerCase().includes(query) ||
-        balloon.meshAddress.toString().includes(query) ||
-        balloon.groupName.toLowerCase().includes(query);
+        balloon.meshAddress.toString().includes(query);
     })
   );
   const onlineCount = $derived(balloons.filter((balloon) => balloon.online).length);
@@ -170,10 +166,6 @@
         selectedAddress = balloons[0].meshAddress;
       }
       fitInitialView();
-    }
-    if (selectedAddress != null) {
-      const current = balloons.find((balloon) => balloon.meshAddress === selectedAddress);
-      if (current) moveGroupId = current.groupId;
     }
     syncMarkers();
     syncAnchors();
@@ -287,8 +279,6 @@
 
   function selectBalloon(address: number) {
     selectedAddress = address;
-    const current = balloons.find((balloon) => balloon.meshAddress === address);
-    if (current) moveGroupId = current.groupId;
     for (const balloon of balloons) {
       const marker = markers.get(balloon.meshAddress);
       if (marker) updateMarkerElement(balloon, marker.getElement());
@@ -472,36 +462,6 @@
     }
   }
 
-  async function createGroup() {
-    if (!model.canAdmin || !newGroupName.trim()) return;
-    try {
-      const group = await api('/api/groups', {
-        method: 'POST',
-        body: JSON.stringify({ name: newGroupName.trim() })
-      });
-      newGroupName = '';
-      addLog(`Created ${group.name}`);
-      await fetchState();
-    } catch (error) {
-      addLog(`Create zone: ${(error as Error).message}`);
-    }
-  }
-
-  async function moveSelectedBalloon() {
-    if (!model.canAdmin || !selectedBalloon) return;
-    try {
-      const moved = await api(`/api/balloons/${selectedBalloon.meshAddress}/group`, {
-        method: 'POST',
-        body: JSON.stringify({ groupId: moveGroupId })
-      });
-      upsertBalloon(moved);
-      addLog(`${moved.name} moved to ${moved.groupName}`);
-      await fetchState();
-    } catch (error) {
-      addLog(`Move balloon: ${(error as Error).message}`);
-    }
-  }
-
   async function cancelShowStep(id: number) {
     if (!model.canOperate) return;
     try {
@@ -552,7 +512,6 @@
 
   function targetPayload() {
     if (targetMode === 'all') return { targetKind: 'all', target: 'all' };
-    if (targetMode === 'group') return { targetKind: 'group', target: String(targetGroup) };
     if (!selectedBalloon) throw new Error('Select a balloon first.');
     return { targetKind: 'balloon', target: String(selectedBalloon.meshAddress) };
   }
@@ -742,15 +701,8 @@
     <section class="panel fleet-panel">
       <div class="panel-title">
         <h2>Fleet</h2>
-        <input class="search" bind:value={search} placeholder="Search name, address, zone" />
+        <input class="search" bind:value={search} placeholder="Search name or address" />
       </div>
-      {#if model.canAdmin}
-        <div class="new-group">
-          <input bind:value={newGroupName} placeholder="New zone name"
-                 onkeydown={(event) => { if (event.key === 'Enter') void createGroup(); }} />
-          <button onclick={createGroup}>Add zone</button>
-        </div>
-      {/if}
       <div class="balloon-list">
         {#each filteredBalloons as balloon}
           <button class="balloon-row" class:selected={balloon.meshAddress === selectedAddress}
@@ -758,7 +710,7 @@
             <span class="swatch" style={`background:${markerColor(balloon)}`}></span>
             <span class="row-main">
               <strong>{balloon.name}</strong>
-              <small>0x{balloon.meshAddress.toString(16).toUpperCase()} · {balloon.groupName}</small>
+              <small>0x{balloon.meshAddress.toString(16).toUpperCase()}</small>
             </span>
             <span class="row-meta">
               <small>{balloon.lat == null ? 'no fix' : `${balloon.lat.toFixed(5)}, ${balloon.lon?.toFixed(5)}`}</small>
@@ -776,7 +728,6 @@
           <span class="pill">0x{selectedBalloon.meshAddress.toString(16).toUpperCase()}</span>
         </div>
         <dl class="detail-grid">
-          <div><dt>Layer</dt><dd>{selectedBalloon.groupName}</dd></div>
           <div><dt>Position</dt><dd>
             {selectedBalloon.lat == null ? 'not fixed' : `${selectedBalloon.lat.toFixed(6)}, ${selectedBalloon.lon?.toFixed(6)}`}
           </dd></div>
@@ -785,20 +736,6 @@
           <div><dt>Queue</dt><dd>{selectedBalloon.estimatedQueueCount} est. / {selectedBalloon.queueCount} reported</dd></div>
           <div><dt>Colour</dt><dd><span class="swatch inline" style={`background:${markerColor(selectedBalloon)}`}></span></dd></div>
         </dl>
-
-        {#if model.canAdmin}
-          <div class="group-move">
-            <label class="field">
-              <span>Move to zone</span>
-              <select bind:value={moveGroupId}>
-                {#each groups.filter((group) => group.meshGroupAddress !== 0xC010) as group}
-                  <option value={group.id}>{group.name}</option>
-                {/each}
-              </select>
-            </label>
-            <button onclick={moveSelectedBalloon}>Move</button>
-          </div>
-        {/if}
 
         <div class="button-row">
           <button class:active={pickMode} onclick={() => (pickMode = !pickMode)} disabled={!model.canOperate}>
@@ -820,21 +757,9 @@
         <span>Target</span>
         <select bind:value={targetMode}>
           <option value="balloon">Selected balloon</option>
-          <option value="group">Group / zone</option>
           <option value="all">All balloons</option>
         </select>
       </label>
-
-      {#if targetMode === 'group'}
-        <label class="field">
-          <span>Group</span>
-          <select bind:value={targetGroup}>
-            {#each groups as group}
-              <option value={group.id}>{group.name}{group.id === 5 ? '' : ` · ${group.balloonCount}`}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
 
       <div class="colour-row">
         <label class="colour-picker">

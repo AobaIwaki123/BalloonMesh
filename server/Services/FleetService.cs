@@ -167,22 +167,7 @@ public sealed class FleetService
 
         if (normalized is "group" or "zone")
         {
-            var group = int.TryParse(target, out var id) ? _store.GetGroup(id) : null;
-            if (group is null && TryParseUShort(target, out var groupAddress))
-            {
-                group = _store.GetGroups().FirstOrDefault(g => g.MeshGroupAddress == groupAddress);
-            }
-            if (group is null)
-            {
-                throw new ArgumentException($"Group '{target}' was not found.");
-            }
-            var members = group.MeshGroupAddress == BalloonProtocol.GroupLedAll
-                ? _store.GetBalloons()
-                : _store.GetBalloonsInGroup(group.Id);
-            return new TargetSpec(
-                group.MeshGroupAddress,
-                members,
-                $"group {group.Name}");
+            throw new ArgumentException("Zone targets are no longer supported. Choose all balloons or an individual balloon.");
         }
 
         if (normalized is "balloon" or "node")
