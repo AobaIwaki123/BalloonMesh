@@ -13,14 +13,18 @@
 #define BM_MODEL_ID_CONTROL 0x0001u
 #define BM_MODEL_ID_TELEMETRY 0x0002u
 
-/* One shared group for broadcasts; individual nodes use unicast addresses. */
-#define BM_GROUP_ALL 0xC010u
-#define BM_GROUP_FTM_REPORT BM_GROUP_ALL
-#define BM_GROUP_NEIGHBOR_REPORT BM_GROUP_ALL
-#define BM_GROUP_QUEUE_STATUS BM_GROUP_ALL
-#define BM_GROUP_NEIGHBOR_PROBE BM_GROUP_ALL
-#define BM_GROUP_TIME BM_GROUP_ALL
-#define BM_GROUP_LED_ALL BM_GROUP_ALL
+/* Two broadcast groups by receiver role; individual nodes use unicast addresses.
+ * Each model subscribes to only one of them (well under the library's
+ * CONFIG_BLE_MESH_MODEL_GROUP_COUNT limit of 3). */
+#define BM_GROUP_BALLOON 0xC010u /* balloon-facing: LED, time, neighbour probe */
+#define BM_GROUP_GATEWAY 0xC011u /* gateway-facing: FTM/neighbour/queue reports */
+
+#define BM_GROUP_FTM_REPORT BM_GROUP_GATEWAY
+#define BM_GROUP_NEIGHBOR_REPORT BM_GROUP_GATEWAY
+#define BM_GROUP_QUEUE_STATUS BM_GROUP_GATEWAY
+#define BM_GROUP_NEIGHBOR_PROBE BM_GROUP_BALLOON
+#define BM_GROUP_TIME BM_GROUP_BALLOON
+#define BM_GROUP_LED_ALL BM_GROUP_BALLOON
 
 /* Provisioning identity (PB-ADV/PB-GATT).  Replace per device. */
 #define BM_PROV_UUID { 0xB1, 0xA1, 0x10, 0x00, 0x00, 0x01, 0x11, 0x22, \

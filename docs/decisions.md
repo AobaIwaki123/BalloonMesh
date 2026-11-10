@@ -103,7 +103,7 @@ payload は hex。ACK は実装していません。Gateway は重複排除・�
 
 **暫定:**
 
-- REQUEST は 1 回だけ送信（TTL=0、`0xC004` group）
+- REQUEST は 1 回だけ送信（TTL=0、バルーングループ `0xC010`）
 - REQUEST を受けたバルーンは、直後〜20 秒の窓で 3 回の PROBE をランダム間隔で送信
 - 要求元は `recv_ttl == 0` の PROBE だけを RSSI 収集対象にする
 - 同一近隣の複数サンプルは整数 median（偶数個は切り捨て平均）
@@ -157,7 +157,7 @@ Arduino を維持する場合の推奨確認手順:
 - サーバ再起動時の queued 予約再投入
 - 基準局座標の更新 API（PUT /api/anchors/{id}）
 - 個体別 Provisioning UUID（Bluetooth MAC 由来）
-- Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT、Group 0xC005）
+- Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT、バルーングループ 0xC010）
 - Gateway の NVS オフラインスプール（128 件、再接続後に再送）
 - Gateway 共有トークン認証（hello / X-Gateway-Token）
 - UI の Gateway 状態（prov/unprov、spool 件数、transport）

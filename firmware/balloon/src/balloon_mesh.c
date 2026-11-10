@@ -97,9 +97,9 @@ static void subscribe_control_groups(void) {
             addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, group);
     }
     esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
-        addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, BM_GROUP_ALL);
+        addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, BM_GROUP_BALLOON);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "subscribe 0x%04x failed: %s", BM_GROUP_ALL, esp_err_to_name(err));
+        ESP_LOGW(TAG, "subscribe 0x%04x failed: %s", BM_GROUP_BALLOON, esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "provisioned with primary address 0x%04x", addr);
 }

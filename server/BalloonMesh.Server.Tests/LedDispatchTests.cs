@@ -91,6 +91,17 @@ public sealed class LedDispatchTests
     }
 
     [Fact]
+    public void BroadcastGroupsAreSplitByReceiverRole()
+    {
+        Assert.Equal((ushort)0xC010, BalloonProtocol.GroupLedAll);
+        Assert.Equal((ushort)0xC010, BalloonProtocol.GroupTime);
+        Assert.Equal((ushort)0xC010, BalloonProtocol.GroupNeighborProbe);
+        Assert.Equal((ushort)0xC011, BalloonProtocol.GroupFtmReport);
+        Assert.Equal((ushort)0xC011, BalloonProtocol.GroupNeighborReport);
+        Assert.Equal((ushort)0xC011, BalloonProtocol.GroupQueueStatus);
+    }
+
+    [Fact]
     public void GroupsCanBeCreatedAssignedAndDeletedWhenEmpty()
     {
         using var database = new TemporaryDatabase();

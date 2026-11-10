@@ -85,9 +85,9 @@ static void subscribe_telemetry_groups(void) {
             addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY, legacy_groups[i]);
     }
     esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
-        addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY, BM_GROUP_ALL);
+        addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY, BM_GROUP_GATEWAY);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "subscribe 0x%04x: %s", BM_GROUP_ALL, esp_err_to_name(err));
+        ESP_LOGW(TAG, "subscribe 0x%04x: %s", BM_GROUP_GATEWAY, esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "gateway mesh primary address 0x%04x", addr);
 }
