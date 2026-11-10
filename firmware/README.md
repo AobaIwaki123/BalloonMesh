@@ -25,6 +25,10 @@ cd balloon
 pio run
 pio run -t upload
 
+# BLE Mesh only bring-up (Protocol A / FTM disabled)
+pio run -e balloon-mesh-bringup
+pio run -e balloon-mesh-bringup -t upload
+
 cd ../anchor
 pio run
 pio run -t upload
@@ -49,7 +53,8 @@ pio test -e native
   - 基準局 SSID / UDP ポート / トークン
   - LED GPIO
   - Group Address / Model ID / Company ID
-- `BM_ENABLE_POSITIONING` は既定値 `0`。BLE Meshの実機立ち上げ時はWi-Fi/FTMを起動せず、Mesh初期化だけを検証する。Protocol A/FTMを検証するときは `1` にする。
+- `balloon` 環境は通常ファームウェアとして `BM_ENABLE_POSITIONING=1`（Protocol A / FTM有効）でビルドする。
+- `balloon-mesh-bringup` 環境は `BM_ENABLE_POSITIONING=0`（Wi-Fi/FTM無効）で、BLE Meshだけを確認するときに使う。
 
 ### anchor
 - `platformio.ini` の `-DBM_ANCHOR_ID=N`
