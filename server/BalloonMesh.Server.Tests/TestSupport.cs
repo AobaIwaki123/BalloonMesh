@@ -78,6 +78,7 @@ public sealed class RecordingMonitorEvents : IMonitorEvents
     public Task GatewayUpdatedAsync(IReadOnlyList<GatewayDto> gateways) => Task.CompletedTask;
     public Task SimulationChangedAsync(bool running) => Task.CompletedTask;
     public Task CommandSentAsync(CommandResultDto result) => Task.CompletedTask;
+    public Task OnboardingUpdatedAsync(IReadOnlyList<MockProvisioningDevice> devices) => Task.CompletedTask;
 }
 
 public sealed class TestTimeProvider : TimeProvider

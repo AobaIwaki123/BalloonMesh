@@ -3,7 +3,34 @@ using SvelteSharp.Models;
 namespace BalloonMesh.Server.Models;
 
 [SvelteModel(Name = "HomePage")]
-public sealed record HomePageModel(string Title, string Version, string Subtitle);
+public sealed record HomePageModel(
+    string Title,
+    string Version,
+    string Subtitle,
+    string UserName,
+    string UserProvider,
+    string? UserAvatar,
+    bool CanOperate,
+    bool CanAdmin);
+
+[SvelteModel(Name = "LoginPage")]
+public sealed record LoginPageModel(
+    string Title,
+    bool OidcEnabled,
+    bool DiscordEnabled,
+    bool MockEnabled,
+    string? Error);
+
+public sealed record MockProvisioningDevice(
+    string Id,
+    string Name,
+    string Kind,
+    string Uuid,
+    ushort? MeshAddress,
+    string State,
+    int Progress,
+    string? Error,
+    DateTimeOffset UpdatedAt);
 
 public sealed record BalloonDto(
     ushort MeshAddress,

@@ -23,6 +23,7 @@
     <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Jint\SvelteSharp.Jint.csproj" />
     <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Build\SvelteSharp.Build.csproj" />
     <PackageReference Include="Npgsql" Version="10.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.0" />
   </ItemGroup>
 
   <!-- SvelteSharp ships this target in its NuGet package; the repository sample

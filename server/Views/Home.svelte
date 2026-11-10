@@ -41,6 +41,16 @@
   };
   type Group = { id: number; name: string; meshGroupAddress: number; balloonCount: number };
   type HistorySample = { lat: number; lon: number; confidence: number; method: string };
+  type MockDevice = {
+    id: string;
+    name: string;
+    kind: string;
+    uuid: string;
+    meshAddress: number | null;
+    state: string;
+    progress: number;
+    error: string | null;
+  };
   type ShowStep = {
     id: number;
     name: string;
@@ -73,6 +83,7 @@
   let trailVisible = $state(true);
   let selectedHistory = $state<HistorySample[]>([]);
   let showSteps = $state<ShowStep[]>([]);
+  let onboarding = $state<MockDevice[]>([]);
   let newGroupName = $state('');
   let moveGroupId = $state(1);
   let busy = $state(false);
@@ -98,6 +109,10 @@
   );
   const onlineCount = $derived(balloons.filter((balloon) => balloon.online).length);
   const provisionedGateways = $derived(gateways.filter((gateway) => gateway.provisioned).length);
+
+  function roleLabel(): string {
+    return model.canAdmin ? 'Admin' : model.canOperate ? 'Operator' : 'Viewer';
+  }
 
   function addLog(message: string) {
     const now = new Date().toLocaleTimeString();
@@ -389,6 +404,7 @@
     hub.on('queueUpdated', upsertBalloon);
     hub.on('gatewaysUpdated', (value: Gateway[]) => { gateways = value; });
     hub.on('simulationChanged', (value: boolean) => { simulationRunning = value; });
+    hub.on('onboardingUpdated', (value: MockDevice[]) => { onboarding = value; });
     hub.on('commandSent', (result: any) => {
       if (result?.message) addLog(result.message);
     });
@@ -407,6 +423,36 @@
     }
   }
 
+  async function fetchOnboarding() {
+    if (!model.canAdmin) return;
+    try {
+      onboarding = await api('/api/onboarding/mock') as MockDevice[];
+    } catch {
+      // onboarding is optional
+    }
+  }
+
+  async function provisionMock(id: string) {
+    if (!model.canAdmin) return;
+    try {
+      await api(`/api/onboarding/mock/${id}/provision`, { method: 'POST' });
+      await fetchOnboarding();
+    } catch (error) {
+      addLog(`Mock provision: ${(error as Error).message}`);
+    }
+  }
+
+  async function resetMockOnboarding() {
+    if (!model.canAdmin) return;
+    try {
+      await api('/api/onboarding/mock/reset', { method: 'POST' });
+      await fetchOnboarding();
+      addLog('Mock onboarding reset');
+    } catch (error) {
+      addLog(`Mock reset: ${(error as Error).message}`);
+    }
+  }
+
   async function fetchShow() {
     try {
       showSteps = await api('/api/show?limit=12') as ShowStep[];
@@ -420,13 +466,14 @@
       const state = await api('/api/state');
       applyState(state);
       void fetchShow();
+      void fetchOnboarding();
     } catch (error) {
       addLog(`State refresh failed: ${(error as Error).message}`);
     }
   }
 
   async function createGroup() {
-    if (!newGroupName.trim()) return;
+    if (!model.canAdmin || !newGroupName.trim()) return;
     try {
       const group = await api('/api/groups', {
         method: 'POST',
@@ -441,7 +488,7 @@
   }
 
   async function moveSelectedBalloon() {
-    if (!selectedBalloon) return;
+    if (!model.canAdmin || !selectedBalloon) return;
     try {
       const moved = await api(`/api/balloons/${selectedBalloon.meshAddress}/group`, {
         method: 'POST',
@@ -456,6 +503,7 @@
   }
 
   async function cancelShowStep(id: number) {
+    if (!model.canOperate) return;
     try {
       const result = await api(`/api/show/${id}`, { method: 'DELETE' });
       if (result?.message) addLog(result.message);
@@ -575,7 +623,7 @@
   }
 
   async function applyInitialPosition(lat: number, lon: number) {
-    if (!selectedBalloon) return;
+    if (!model.canOperate || !selectedBalloon) return;
     try {
       const updated = await api(`/api/balloons/${selectedBalloon.meshAddress}/initial-position`, {
         method: 'POST',
@@ -596,6 +644,7 @@
   }
 
   async function toggleSimulation() {
+    if (!model.canAdmin) return;
     try {
       const path = simulationRunning ? '/api/demo/stop' : '/api/demo/start';
       await api(path, { method: 'POST' });
@@ -667,9 +716,26 @@
         <strong>{signalConnected ? 'LIVE' : 'POLL'}</strong><span>{statusLine}</span>
       </div>
     </div>
-    <button class="sim-toggle" class:on={simulationRunning} onclick={toggleSimulation}>
-      {simulationRunning ? 'Demo running' : 'Start demo'}
-    </button>
+    {#if model.canAdmin}
+      <button class="sim-toggle" class:on={simulationRunning} onclick={toggleSimulation}>
+        {simulationRunning ? 'Demo running' : 'Start demo'}
+      </button>
+    {/if}
+
+    <div class="user-chip">
+      {#if model.userAvatar}
+        <img src={model.userAvatar} alt="" />
+      {:else}
+        <span class="user-avatar">{model.userName.slice(0, 1).toUpperCase()}</span>
+      {/if}
+      <div class="user-meta">
+        <strong>{model.userName}</strong>
+        <small>{model.userProvider} · {roleLabel()}</small>
+      </div>
+      <form method="post" action="/auth/logout">
+        <button class="logout" type="submit">Logout</button>
+      </form>
+    </div>
   </header>
 
   <aside class="sidebar">
@@ -678,11 +744,13 @@
         <h2>Fleet</h2>
         <input class="search" bind:value={search} placeholder="Search name, address, zone" />
       </div>
-      <div class="new-group">
-        <input bind:value={newGroupName} placeholder="New zone name"
-               onkeydown={(event) => { if (event.key === 'Enter') void createGroup(); }} />
-        <button onclick={createGroup}>Add zone</button>
-      </div>
+      {#if model.canAdmin}
+        <div class="new-group">
+          <input bind:value={newGroupName} placeholder="New zone name"
+                 onkeydown={(event) => { if (event.key === 'Enter') void createGroup(); }} />
+          <button onclick={createGroup}>Add zone</button>
+        </div>
+      {/if}
       <div class="balloon-list">
         {#each filteredBalloons as balloon}
           <button class="balloon-row" class:selected={balloon.meshAddress === selectedAddress}
@@ -718,23 +786,25 @@
           <div><dt>Colour</dt><dd><span class="swatch inline" style={`background:${markerColor(selectedBalloon)}`}></span></dd></div>
         </dl>
 
-        <div class="group-move">
-          <label class="field">
-            <span>Move to zone</span>
-            <select bind:value={moveGroupId}>
-              {#each groups.filter((group) => group.meshGroupAddress !== 0xC010) as group}
-                <option value={group.id}>{group.name}</option>
-              {/each}
-            </select>
-          </label>
-          <button onclick={moveSelectedBalloon}>Move</button>
-        </div>
+        {#if model.canAdmin}
+          <div class="group-move">
+            <label class="field">
+              <span>Move to zone</span>
+              <select bind:value={moveGroupId}>
+                {#each groups.filter((group) => group.meshGroupAddress !== 0xC010) as group}
+                  <option value={group.id}>{group.name}</option>
+                {/each}
+              </select>
+            </label>
+            <button onclick={moveSelectedBalloon}>Move</button>
+          </div>
+        {/if}
 
         <div class="button-row">
-          <button class:active={pickMode} onclick={() => (pickMode = !pickMode)}>
+          <button class:active={pickMode} onclick={() => (pickMode = !pickMode)} disabled={!model.canOperate}>
             {pickMode ? 'Click map to place…' : 'Set initial on map'}
           </button>
-          <button onclick={setInitialFromInputs}>Use current point</button>
+          <button onclick={setInitialFromInputs} disabled={!model.canOperate}>Use current point</button>
           <button onclick={toggleTrail}>{trailVisible ? 'Hide trail' : 'Show trail'}</button>
         </div>
       </section>
@@ -785,17 +855,54 @@
       </label>
 
       <div class="button-grid">
-        <button class="primary" onclick={setNow}>LED now</button>
-        <button class="primary" onclick={schedule}>Schedule</button>
-        <button onclick={cancelAt}>Cancel at time</button>
-        <button onclick={() => resetAll(false)}>Reset through now</button>
-        <button class="wide" onclick={() => resetAll(true)}>Reset + set colour now</button>
+        <button class="primary" onclick={setNow} disabled={!model.canOperate}>LED now</button>
+        <button class="primary" onclick={schedule} disabled={!model.canOperate}>Schedule</button>
+        <button onclick={cancelAt} disabled={!model.canOperate}>Cancel at time</button>
+        <button onclick={() => resetAll(false)} disabled={!model.canOperate}>Reset through now</button>
+        <button class="wide" onclick={() => resetAll(true)} disabled={!model.canOperate}>Reset + set colour now</button>
       </div>
 
       {#if targetMode === 'balloon' && !selectedBalloon}
         <p class="hint">Select a balloon to use per-balloon commands.</p>
       {/if}
     </section>
+
+    {#if model.canAdmin}
+      <section class="panel onboarding-panel">
+        <div class="panel-title">
+          <h2>Onboarding <span class="mock-badge">MOCK</span></h2>
+          <button class="mini" onclick={resetMockOnboarding}>Reset</button>
+        </div>
+        <p class="hint">BLE Mesh Provisioner の UI を模擬しています。Provision は数秒で完了します。</p>
+        <ul class="onboarding-list">
+          {#each onboarding as device}
+            <li>
+              <span class="onb-kind">{device.kind === 'balloon' ? 'B' : 'G'}</span>
+              <span class="onb-main">
+                <strong>{device.name}</strong>
+                <small>{device.uuid.slice(0, 8)}… · {device.meshAddress == null ? 'no addr' : `0x${device.meshAddress.toString(16).toUpperCase()}`}</small>
+              </span>
+              <span class="show-status"
+                    class:queued={device.state === 'provisioned'}
+                    class:canceled={device.state === 'failed'}
+                    class:sent={device.state === 'provisioning'}>{device.state}</span>
+              {#if device.state === 'unprovisioned' || device.state === 'failed'}
+                <button class="mini" onclick={() => provisionMock(device.id)}>Provision</button>
+              {/if}
+            </li>
+            {#if device.state === 'provisioning'}
+              <li class="progress-row">
+                <div class="progress"><span style={`width:${device.progress}%`}></span></div>
+                <small>{device.progress}%</small>
+              </li>
+            {/if}
+            {#if device.error}
+              <li class="error-row">{device.error}</li>
+            {/if}
+          {/each}
+        </ul>
+      </section>
+    {/if}
 
     <section class="panel schedule-panel">
       <div class="panel-title">
@@ -945,6 +1052,20 @@
     font-weight: 600;
     cursor: pointer;
   }
+  .user-chip {
+    display: flex; align-items: center; gap: 9px; padding: 6px 8px 6px 6px;
+    border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(15, 23, 42, 0.55);
+  }
+  .user-chip img, .user-avatar {
+    width: 30px; height: 30px; border-radius: 9px; object-fit: cover;
+    display: grid; place-items: center; font-size: 12px; font-weight: 700;
+    background: rgba(56, 189, 248, 0.16); color: #7dd3fc;
+  }
+  .user-meta { display: flex; flex-direction: column; line-height: 1.15; }
+  .user-meta strong { font-size: 11px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .user-meta small { font-size: 9px; color: #94a3b8; }
+  .logout { padding: 6px 8px; font-size: 9px; }
   .sim-toggle.on {
     border-color: rgba(52, 211, 153, 0.5);
     background: rgba(52, 211, 153, 0.14);
@@ -1092,6 +1213,27 @@
   .hint { margin: 8px 0 0; font-size: 11px; color: #64748b; }
   .log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
   .log li { font-size: 10px; color: #94a3b8; border-left: 2px solid rgba(56, 189, 248, 0.4); padding-left: 8px; }
+  .mock-badge {
+    font-size: 8px; padding: 2px 6px; border-radius: 999px;
+    color: #fde68a; border: 1px solid rgba(251, 191, 36, 0.45);
+    background: rgba(251, 191, 36, 0.12); letter-spacing: 0.1em;
+  }
+  .onboarding-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .onboarding-list li { display: flex; align-items: center; gap: 8px; }
+  .onb-kind {
+    width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center;
+    font-size: 9px; font-weight: 700; color: #7dd3fc; background: rgba(56, 189, 248, 0.14);
+  }
+  .onb-main { display: flex; flex-direction: column; min-width: 0; }
+  .onb-main strong { font-size: 11px; }
+  .onb-main small { font-size: 9px; color: #94a3b8; }
+  .progress-row { padding-left: 28px; }
+  .progress-row small { font-size: 9px; color: #94a3b8; width: 30px; text-align: right; }
+  .progress { flex: 1; height: 4px; border-radius: 999px; background: rgba(148, 163, 184, 0.18); overflow: hidden; }
+  .progress span { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #a78bfa); transition: width 0.3s ease; }
+  .error-row { padding-left: 28px; font-size: 9px; color: #fca5a5; }
+  button:disabled { opacity: 0.42; cursor: not-allowed; }
+  button:disabled:hover { border-color: rgba(148, 163, 184, 0.25); background: rgba(15, 23, 42, 0.75); }
   .anchor-status-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .anchor-status-list li { display: flex; align-items: center; gap: 8px; font-size: 11px; }
   .anchor-status-list small { color: #94a3b8; font-size: 9px; margin-left: auto; }
