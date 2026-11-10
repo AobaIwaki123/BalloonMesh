@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -130,10 +131,15 @@ public static class AuthSetup
                 options.ClaimActions.MapJsonKey(ClaimTypes.NameIdentifier, "id");
                 options.ClaimActions.MapJsonKey(ClaimTypes.Name, "username");
                 options.ClaimActions.MapJsonKey(ClaimTypes.Email, "email");
-                options.Events.OnCreatingTicket = context =>
+                options.Events.OnCreatingTicket = async context =>
                 {
-                    NormalizeDiscordIdentity(context, configuration);
-                    return Task.CompletedTask;
+                    using var request = new HttpRequestMessage(HttpMethod.Get, context.Options.UserInformationEndpoint);
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", context.AccessToken);
+                    using var response = await context.Backchannel.SendAsync(request, context.HttpContext.RequestAborted);
+                    response.EnsureSuccessStatusCode();
+                    using var user = JsonDocument.Parse(await response.Content.ReadAsStringAsync(context.HttpContext.RequestAborted));
+                    context.RunClaimActions(user.RootElement);
+                    NormalizeDiscordIdentity(context, user.RootElement, configuration);
                 };
                 options.Events.OnRemoteFailure = context =>
                 {
@@ -293,13 +299,12 @@ public static class AuthSetup
     }
 
     private static void NormalizeDiscordIdentity(OAuthCreatingTicketContext context,
-        IConfiguration configuration)
+        JsonElement user, IConfiguration configuration)
     {
         if (context.Identity is not ClaimsIdentity identity)
         {
             return;
         }
-        var user = context.User;
         var id = GetString(user, "id") ?? string.Empty;
         var username = GetString(user, "username") ?? "Discord User";
         var globalName = GetString(user, "global_name");
