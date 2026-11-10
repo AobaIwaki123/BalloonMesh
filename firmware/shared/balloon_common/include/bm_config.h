@@ -52,10 +52,10 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
     { 3, "BM-ANCHOR-3" },
 };
 
-/* LED PWM pins (ESP32-C3 DevKitM-1). */
-#define BM_LED_R_GPIO 3
-#define BM_LED_G_GPIO 4
-#define BM_LED_B_GPIO 5
+/* LED PWM pins (Seeed XIAO ESP32C3: D0=GPIO2, D1=GPIO3, D2=GPIO4). */
+#define BM_LED_R_GPIO 2
+#define BM_LED_G_GPIO 3
+#define BM_LED_B_GPIO 4
 #define BM_LED_PWM_FREQ_HZ 5000
 #define BM_LED_PWM_RESOLUTION 8
 
