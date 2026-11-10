@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text.Json;
+using BalloonMesh.Server.Auth;
 using BalloonMesh.Server.Data;
 using BalloonMesh.Server.Hubs;
 using BalloonMesh.Server.Models;
@@ -15,6 +16,7 @@ builder.Services
     .AddJsonProtocol(options =>
         options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
 
+builder.Services.AddBalloonMeshAuth(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<DataStore>();
 builder.Services.AddSingleton<FleetService>();
@@ -27,6 +29,7 @@ builder.Services.AddSingleton<FtmAggregator>();
 builder.Services.AddSingleton<MeshReportRouter>();
 builder.Services.AddSingleton<LedDispatchService>();
 builder.Services.AddSingleton<CommandService>();
+builder.Services.AddSingleton<MockProvisioningService>();
 builder.Services.AddSingleton<SimulationService>();
 builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<SimulationService>());
 builder.Services.AddHostedService<AggregationWorker>();
@@ -50,9 +53,12 @@ app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(30)
 });
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapSvelteSharpAssets();
-app.MapHub<MonitorHub>("/hubs/monitor");
+app.MapAuthEndpoints();
+app.MapHub<MonitorHub>("/hubs/monitor").RequireAuthorization(AuthRoles.Viewer);
 
 app.Map("/ws/gateway", async context =>
 {
@@ -73,31 +79,68 @@ app.Map("/ws/gateway", async context =>
         context.RequestAborted);
 });
 
-app.MapGet("/", () => Svelte.View(
-    "Home",
-    new HomePageModel(
-        "Balloon Mesh",
-        ServerInfo.Version,
-        "ESP32-C3 RGB balloon fleet — live 2D map, FTM positioning and LED scheduling"),
-    SvelteRenderMode.Client,
-    new PageMetadata("Balloon Mesh", new Dictionary<string, string>
+app.MapGet("/login", (HttpContext context, IConfiguration configuration) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true)
     {
-        ["viewport"] = "width=device-width, initial-scale=1"
-    })));
+        return Results.Redirect("/");
+    }
+    var error = context.Request.Query["error"].ToString();
+    return Svelte.View(
+        "Login",
+        new LoginPageModel(
+            "Sign in to Balloon Mesh",
+            AuthSetup.OidcEnabled(configuration),
+            AuthSetup.DiscordEnabled(configuration),
+            AuthSetup.MockEnabled(configuration),
+            string.IsNullOrWhiteSpace(error) ? null : error),
+        SvelteRenderMode.Client,
+        new PageMetadata("Sign in", new Dictionary<string, string>
+        {
+            ["viewport"] = "width=device-width, initial-scale=1"
+        }));
+}).AllowAnonymous();
 
-app.MapGet("/favicon.ico", () => Results.NoContent());
+app.MapGet("/", (HttpContext context) =>
+{
+    var user = AuthenticatedUser.From(context.User);
+    return Svelte.View(
+        "Home",
+        new HomePageModel(
+            "Balloon Mesh",
+            ServerInfo.Version,
+            "ESP32-C3 RGB balloon fleet — live 2D map, FTM positioning and LED scheduling",
+            user.Name,
+            user.Provider,
+            user.Avatar,
+            user.CanOperate,
+            user.CanAdmin),
+        SvelteRenderMode.Client,
+        new PageMetadata("Balloon Mesh", new Dictionary<string, string>
+        {
+            ["viewport"] = "width=device-width, initial-scale=1"
+        }));
+}).RequireAuthorization(AuthRoles.Viewer);
+
+app.MapGet("/api/me", (HttpContext context) =>
+    Results.Ok(AuthenticatedUser.From(context.User)))
+    .RequireAuthorization(AuthRoles.Viewer);
+
+app.MapGet("/favicon.ico", () => Results.NoContent()).AllowAnonymous();
 
 app.MapGet("/api/health", () => Results.Ok(new
 {
     status = "ok",
     version = ServerInfo.Version,
     time = DateTimeOffset.UtcNow
-}));
+})).AllowAnonymous();
 
 app.MapGet("/api/state", (FleetService fleet, GatewayRegistry gateways, SimulationService simulation) =>
-    Results.Ok(fleet.GetState(gateways.Snapshot(), simulation.Running, ServerInfo.Version)));
+    Results.Ok(fleet.GetState(gateways.Snapshot(), simulation.Running, ServerInfo.Version)))
+    .RequireAuthorization(AuthRoles.Viewer);
 
-app.MapGet("/api/balloons", (FleetService fleet) => Results.Ok(fleet.GetBalloons()));
+app.MapGet("/api/balloons", (FleetService fleet) => Results.Ok(fleet.GetBalloons()))
+    .RequireAuthorization(AuthRoles.Viewer);
 
 app.MapGet("/api/balloons/{address}", (string address, FleetService fleet) =>
 {
@@ -107,7 +150,7 @@ app.MapGet("/api/balloons/{address}", (string address, FleetService fleet) =>
     }
     var balloon = fleet.GetBalloon(meshAddress);
     return balloon is null ? Results.NotFound() : Results.Ok(balloon);
-});
+}).RequireAuthorization(AuthRoles.Viewer);
 
 app.MapGet("/api/balloons/{address}/history", (string address, int? limit, FleetService fleet) =>
 {
@@ -116,7 +159,7 @@ app.MapGet("/api/balloons/{address}/history", (string address, int? limit, Fleet
         return Results.BadRequest(new { error = "Invalid balloon address." });
     }
     return Results.Ok(fleet.GetHistory(meshAddress, limit ?? 100));
-});
+}).RequireAuthorization(AuthRoles.Viewer);
 
 app.MapPost("/api/balloons/{address}/initial-position",
     (string address, InitialPositionRequest request, FleetService fleet) =>
@@ -133,7 +176,7 @@ app.MapPost("/api/balloons/{address}/initial-position",
         {
             return Results.BadRequest(new { error = exception.Message });
         }
-    });
+    }).RequireAuthorization(AuthRoles.Operator);
 
 app.MapPost("/api/groups", (CreateGroupRequest request, FleetService fleet) =>
 {
@@ -145,12 +188,13 @@ app.MapPost("/api/groups", (CreateGroupRequest request, FleetService fleet) =>
     {
         return Results.BadRequest(new { error = exception.Message });
     }
-});
+}).RequireAuthorization(AuthRoles.Admin);
 
 app.MapDelete("/api/groups/{id:int}", (int id, FleetService fleet) =>
     fleet.DeleteGroup(id)
         ? Results.NoContent()
-        : Results.BadRequest(new { error = "Group is not empty, is the all-balloons group, or does not exist." }));
+        : Results.BadRequest(new { error = "Group is not empty, is the all-balloons group, or does not exist." }))
+    .RequireAuthorization(AuthRoles.Admin);
 
 app.MapPost("/api/balloons/{address}/group",
     (string address, AssignGroupRequest request, FleetService fleet) =>
@@ -167,9 +211,10 @@ app.MapPost("/api/balloons/{address}/group",
         {
             return Results.BadRequest(new { error = exception.Message });
         }
-    });
+    }).RequireAuthorization(AuthRoles.Admin);
 
-app.MapGet("/api/anchors", (FleetService fleet) => Results.Ok(fleet.GetAnchors()));
+app.MapGet("/api/anchors", (FleetService fleet) => Results.Ok(fleet.GetAnchors()))
+    .RequireAuthorization(AuthRoles.Viewer);
 
 app.MapPut("/api/anchors/{id:int}", (int id, AnchorUpdateRequest request, FleetService fleet) =>
 {
@@ -186,20 +231,37 @@ app.MapPut("/api/anchors/{id:int}", (int id, AnchorUpdateRequest request, FleetS
     {
         return Results.BadRequest(new { error = exception.Message });
     }
-});
+}).RequireAuthorization(AuthRoles.Admin);
 
-app.MapGet("/api/groups", (FleetService fleet) => Results.Ok(fleet.GetGroups()));
+app.MapGet("/api/groups", (FleetService fleet) => Results.Ok(fleet.GetGroups()))
+    .RequireAuthorization(AuthRoles.Viewer);
 
-app.MapGet("/api/gateways", (GatewayRegistry gateways) => Results.Ok(gateways.Snapshot()));
+app.MapGet("/api/gateways", (GatewayRegistry gateways) => Results.Ok(gateways.Snapshot()))
+    .RequireAuthorization(AuthRoles.Viewer);
 
 app.MapGet("/api/show", (DataStore store, int? limit) =>
-    Results.Ok(store.GetShowSteps(limit ?? 50)));
+    Results.Ok(store.GetShowSteps(limit ?? 50))).RequireAuthorization(AuthRoles.Viewer);
 
 app.MapDelete("/api/show/{id:long}", async (long id, CommandService service, CancellationToken cancellationToken) =>
 {
     var result = await service.CancelShowStepAsync(id, cancellationToken);
     return result is null ? Results.NotFound() : Results.Ok(result);
-});
+}).RequireAuthorization(AuthRoles.Operator);
+
+app.MapGet("/api/onboarding/mock", (MockProvisioningService service) =>
+    Results.Ok(service.Snapshot())).RequireAuthorization(AuthRoles.Admin);
+
+app.MapPost("/api/onboarding/mock/{id}/provision", (string id, MockProvisioningService service) =>
+    service.Provision(id)
+        ? Results.Accepted(value: new { id, state = "provisioning" })
+        : Results.BadRequest(new { error = "Unknown device or already provisioning/provisioned." }))
+    .RequireAuthorization(AuthRoles.Admin);
+
+app.MapPost("/api/onboarding/mock/reset", (MockProvisioningService service) =>
+{
+    service.Reset();
+    return Results.Ok(new { reset = true });
+}).RequireAuthorization(AuthRoles.Admin);
 
 app.MapPost("/api/commands/led-set", async (LedSetRequest request, CommandService service,
     CancellationToken cancellationToken) =>
@@ -212,7 +274,7 @@ app.MapPost("/api/commands/led-set", async (LedSetRequest request, CommandServic
     {
         return Results.BadRequest(new { error = exception.Message });
     }
-});
+}).RequireAuthorization(AuthRoles.Operator);
 
 app.MapPost("/api/commands/now", async (LedNowRequest request, CommandService service,
     CancellationToken cancellationToken) =>
@@ -225,7 +287,7 @@ app.MapPost("/api/commands/now", async (LedNowRequest request, CommandService se
     {
         return Results.BadRequest(new { error = exception.Message });
     }
-});
+}).RequireAuthorization(AuthRoles.Operator);
 
 app.MapPost("/api/commands/cancel", async (LedCancelRequest request, CommandService service,
     CancellationToken cancellationToken) =>
@@ -238,7 +300,7 @@ app.MapPost("/api/commands/cancel", async (LedCancelRequest request, CommandServ
     {
         return Results.BadRequest(new { error = exception.Message });
     }
-});
+}).RequireAuthorization(AuthRoles.Operator);
 
 app.MapPost("/api/commands/reset", async (LedResetRequest request, CommandService service,
     CancellationToken cancellationToken) =>
@@ -251,19 +313,19 @@ app.MapPost("/api/commands/reset", async (LedResetRequest request, CommandServic
     {
         return Results.BadRequest(new { error = exception.Message });
     }
-});
+}).RequireAuthorization(AuthRoles.Operator);
 
 app.MapPost("/api/demo/start", async (SimulationService simulation, CancellationToken cancellationToken) =>
 {
     await simulation.SetRunningAsync(true, cancellationToken);
     return Results.Ok(new { running = true });
-});
+}).RequireAuthorization(AuthRoles.Admin);
 
 app.MapPost("/api/demo/stop", async (SimulationService simulation, CancellationToken cancellationToken) =>
 {
     await simulation.SetRunningAsync(false, cancellationToken);
     return Results.Ok(new { running = false });
-});
+}).RequireAuthorization(AuthRoles.Admin);
 
 app.MapPost("/api/gateway/{id}/events",
     (HttpContext http, string id, GatewayEventsRequest request, GatewayRegistry registry,
