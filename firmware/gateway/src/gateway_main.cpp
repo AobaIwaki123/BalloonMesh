@@ -229,8 +229,7 @@ static void wifi_task(void *argument) {
     (void)argument;
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
-    /* BLE and Wi-Fi coexistence requires Wi-Fi modem sleep on ESP32-C3. */
-    WiFi.setSleep(true);
+    WiFi.setSleep(false);
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
             ESP_LOGI(TAG, "connecting Wi-Fi SSID=%s", BM_GATEWAY_WIFI_SSID);
@@ -254,7 +253,6 @@ static void wifi_task(void *argument) {
 void setup() {
     Serial.begin(115200);
     delay(200);
-    esp_log_level_set("*", ESP_LOG_INFO);
     ESP_LOGI(TAG, "BalloonMesh gateway %s firmware %s", BM_GATEWAY_ID,
              BM_FIRMWARE_VERSION);
 

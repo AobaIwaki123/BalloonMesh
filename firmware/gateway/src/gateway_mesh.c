@@ -37,16 +37,7 @@ static esp_ble_mesh_cfg_srv_t s_config_server = {
 };
 
 ESP_BLE_MESH_HEALTH_PUB_DEFINE(s_health_pub, 0, ROLE_NODE);
-static const uint8_t s_health_test_ids[] = {
-    ESP_BLE_MESH_HEALTH_STANDARD_TEST,
-};
-static esp_ble_mesh_health_srv_t s_health_server = {
-    .health_test = {
-        .id_count = sizeof(s_health_test_ids),
-        .test_ids = s_health_test_ids,
-        .company_id = BM_COMPANY_ID_LOCAL,
-    },
-};
+static esp_ble_mesh_health_srv_t s_health_server;
 
 static esp_ble_mesh_model_op_t s_telemetry_ops[] = {
     ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_FTM_REPORT), 8),
