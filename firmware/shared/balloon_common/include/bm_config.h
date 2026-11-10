@@ -5,10 +5,10 @@
 
 #define BM_FIRMWARE_VERSION "0.1.0"
 
-/* Keep the balloon bring-up independent from Wi-Fi while validating BLE Mesh.
- * Set to 1 when Protocol A / FTM positioning is ready to be exercised. */
+/* Normal balloon firmware includes Protocol A / FTM positioning.  The
+ * BLE-Mesh-only bring-up profile overrides this at build time. */
 #ifndef BM_ENABLE_POSITIONING
-#define BM_ENABLE_POSITIONING 0
+#define BM_ENABLE_POSITIONING 1
 #endif
 
 /* Bluetooth Mesh addressing.  Production deployments should provision these
