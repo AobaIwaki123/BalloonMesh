@@ -32,6 +32,7 @@ public interface IMonitorEvents
     Task GatewayUpdatedAsync(IReadOnlyList<GatewayDto> gateways);
     Task SimulationChangedAsync(bool running);
     Task CommandSentAsync(CommandResultDto result);
+    Task OnboardingUpdatedAsync(IReadOnlyList<MockProvisioningDevice> devices);
 }
 
 public sealed class MonitorNotifier : IMonitorEvents
@@ -57,6 +58,9 @@ public sealed class MonitorNotifier : IMonitorEvents
 
     public Task CommandSentAsync(CommandResultDto result) =>
         _hub.Clients.All.SendAsync("commandSent", result);
+
+    public Task OnboardingUpdatedAsync(IReadOnlyList<MockProvisioningDevice> devices) =>
+        _hub.Clients.All.SendAsync("onboardingUpdated", devices);
 }
 
 public static class ServerInfo

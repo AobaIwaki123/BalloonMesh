@@ -19,11 +19,13 @@ firmware/
   tests/                        PlatformIO project: native Unity テスト
 
 server/                         ASP.NET Core
+  Auth/                         Cookie + OIDC / Discord + role policies
   Protocol/                     Protocol B codec
   Data/                         PostgreSQL (Npgsql)
   Services/                     FTM 集約 / 測位 / LED 配信 / Gateway / シミュレーション
   Hubs/                         SignalR
   Views/Home.svelte             SvelteSharp Client モードの UI
+  Views/Login.svelte            ログイン画面
 
 third_party/SvelteSharp/        git submodule (actbit/SvelteSharp, commit pinned)
 docs/decisions.md               未確定事項に対する今回の暫定決定
@@ -89,7 +91,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、15 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、22 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 
@@ -101,6 +103,89 @@ pio test -e native
 ```
 
 （13 tests）
+
+## 認証・認可
+
+Cookie 認証を基盤に、OIDC と Discord OAuth2 を利用できます。UI、REST API、SignalR はロールポリシーで保護されます。
+
+| ポリシー | ロール | 用途 |
+|---|---|---|
+| Viewer | Viewer / Operator / Admin | 地図・状態・履歴の閲覧 |
+| Operator | Operator / Admin | LED 命令、初期位置、予約キャンセル |
+| Admin | Admin | グループ管理、基準局更新、デモ、オンボーディング操作 |
+
+- 未ログインの API は `401`、権限不足は `403`
+- 未ログインのページは `/login` へリダイレクト
+- Gateway の `/api/gateway/*` と `/ws/gateway` はユーザー認証ではなく `Gateway:Token` で認証
+- SignalR `/hubs/monitor` は Viewer 以上を要求
+
+### OIDC
+
+`server/appsettings.json`:
+
+```json
+"Authentication": {
+  "Oidc": {
+    "Authority": "https://your-idp.example/realms/balloonmesh",
+    "ClientId": "balloonmesh-web",
+    "ClientSecret": "...",
+    "AdminRoles": "balloon-admin",
+    "OperatorRoles": "balloon-operator",
+    "DefaultRole": "Viewer"
+  }
+}
+```
+
+- Callback: `/signin-oidc`
+- Scope: `openid profile email`
+- IdP の `role` / `roles` / `groups` クレームから Admin / Operator を判定
+- Admin / Operator 以外は `DefaultRole`（既定 Viewer）。`None` にすると閲覧も拒否
+
+### Discord
+
+```json
+"Authentication": {
+  "Discord": {
+    "ClientId": "...",
+    "ClientSecret": "...",
+    "AdminUserIds": "123456789012345678",
+    "OperatorUserIds": "234567890123456789",
+    "DefaultRole": "Viewer"
+  }
+}
+```
+
+- Callback: `/signin-discord`
+- `identify` / `email` スコープ
+- Discord ユーザー ID で Admin / Operator を付与
+
+### ローカル開発用ログイン
+
+`appsettings.Development.json` で `Authentication:Mock:Enabled=true` にすると `/auth/login/mock` が使えます。
+
+```powershell
+$env:ASPNETCORE_ENVIRONMENT = "Development"
+dotnet run --project server/BalloonMesh.Server.csproj --urls http://localhost:5080
+```
+
+ロールを試す場合:
+
+- `/auth/login/mock` → Admin
+- `/auth/login/mock?role=Operator`
+- `/auth/login/mock?role=Viewer`
+
+本番では Mock を無効にしてください。
+
+## オンボーディング表示（MOCK）
+
+実機 BLE Mesh Provisioner はまだ未実装のため、Web UI に **Admin 専用の MOCK オンボーディングパネル**を表示します。
+
+- `GET /api/onboarding/mock` — モックデバイス一覧
+- `POST /api/onboarding/mock/{id}/provision` — 数秒かけて `unprovisioned → provisioning → provisioned` をシミュレーション
+- `POST /api/onboarding/mock/reset` — 初期状態へ戻す
+- SignalR `onboardingUpdated` で全 Admin に反映
+
+実際の Provisioner / 鍵配布 / model bind / group subscribe は未実装です。
 
 ### 4. ファームウェア
 
@@ -235,7 +320,7 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 
 | 機能 | ピン / 設定 |
 |---|---|
-| LED R/G/B | GPIO 3 / 4 / 5 (LEDC 5kHz, 8bit) |
+| LED R/G/B (balloon) | XIAO ESP32C3 D0/D1/D2 (GPIO 2/3/4), LEDC 5kHz, 8bit |
 | GPS UART | UART1, RX=7, TX=6, 9600bps |
 | 基準局 SoftAP | `BM-ANCHOR-<id>`, WPA2, channel 6, FTM responder |
 | バルーン Wi-Fi | 各基準局 SoftAP へ順に接続し、UDP で座標・時刻を取得 |
