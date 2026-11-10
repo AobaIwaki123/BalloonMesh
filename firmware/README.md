@@ -71,4 +71,6 @@ pio test -e native
 
 ## Arduino BLE Mesh の注意
 
-Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` が無効な sdkconfig でビルドされています。`balloon` / `gateway` はヘッダ構造体を有効化するため `-DCONFIG_BLE_MESH_NODE=1` を付けていますが、実機 Provisioning はプリビルド構成に依存します。詳細は `../docs/decisions.md` を参照してください。
+Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` が無効な構成でビルドされています。`balloon` はArduinoをESP-IDF 4.4.7のコンポーネントとして組み込み、`sdkconfig.defaults`でMesh Nodeを有効化してBluetoothスタックを再ビルドします。そのため、バルーン側では `-DCONFIG_BLE_MESH_NODE=1` を指定しません。
+
+`gateway` は現時点ではArduino単体の構成で、Mesh Node対応を含むBluetoothスタックの再ビルドは未実施です。GatewayのESP-IDF統合と実機Provisioningは別途検証します。詳細は `../docs/decisions.md` を参照してください。
