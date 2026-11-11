@@ -1,0 +1,89 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:BalloonMesh.DebugTool.ViewModels"
+        xmlns:views="using:BalloonMesh.DebugTool.Views"
+        x:Class="BalloonMesh.DebugTool.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        x:CompileBindings="True"
+        Title="BalloonMesh Debug Tool"
+        Width="1360"
+        Height="900"
+        MinWidth="1000"
+        MinHeight="640"
+        WindowStartupLocation="CenterScreen">
+
+    <Grid RowDefinitions="Auto,*,Auto">
+        <Border Grid.Row="0" Padding="10" BorderBrush="#33808080" BorderThickness="0,0,0,1">
+            <StackPanel Spacing="6">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Server" VerticalAlignment="Center" />
+                        <TextBox Width="220" Text="{Binding ServerUrl}"
+                                 PlaceholderText="http://localhost:5080" />
+                        <TextBlock Text="Gateway token" VerticalAlignment="Center" />
+                        <TextBox Width="150" Text="{Binding GatewayToken}" PasswordChar="*"
+                                 PlaceholderText="optional" />
+                        <TextBlock Text="Session cookie" VerticalAlignment="Center" />
+                        <TextBox Width="160" Text="{Binding AuthCookie}" PasswordChar="*"
+                                 PlaceholderText="optional" />
+                        <TextBlock Text="Mock role" VerticalAlignment="Center" />
+                        <ComboBox Width="110" ItemsSource="{Binding MockRoles}"
+                                  SelectedItem="{Binding MockRole}" />
+                        <Button Content="Connect" Command="{Binding ConnectCommand}" />
+                        <Button Content="Mock login" Command="{Binding LoginMockCommand}" />
+                        <Button Content="Refresh" Command="{Binding RefreshCommand}" />
+                        <ProgressBar Width="100" IsIndeterminate="{Binding IsBusy}"
+                                     IsVisible="{Binding IsBusy}" VerticalAlignment="Center" />
+                    </StackPanel>
+                </ScrollViewer>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ServerVersion, StringFormat='Server {0}'}"
+                               Classes="muted" />
+                    <TextBlock Text="{Binding SimulationStatusText}" Classes="muted" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <TabControl Grid.Row="1" Margin="8" SelectedIndex="{Binding SelectedTabIndex}">
+            <TabItem Header="Fleet">
+                <views:FleetView />
+            </TabItem>
+            <TabItem Header="Commands">
+                <views:CommandsView />
+            </TabItem>
+            <TabItem Header="Gateway simulator">
+                <views:GatewayView />
+            </TabItem>
+            <TabItem Header="Protocol">
+                <views:ProtocolView />
+            </TabItem>
+            <TabItem Header="Decoded log">
+                <views:DecodedLogView />
+            </TabItem>
+        </TabControl>
+
+        <Border Grid.Row="2" Padding="8" BorderBrush="#33808080" BorderThickness="0,1,0,0">
+            <Grid RowDefinitions="Auto,150">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Clear" Padding="10,2"
+                            Command="{Binding ClearLogCommand}" />
+                    <TextBlock Text="Log" Classes="h2" VerticalAlignment="Center" />
+                </DockPanel>
+                <ScrollViewer x:Name="LogScrollViewer" Grid.Row="1"
+                              HorizontalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Log}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:LogLineViewModel">
+                                <TextBlock Text="{Binding Text}" FontSize="12"
+                                           FontFamily="Cascadia Mono,Menlo,Consolas,monospace"
+                                           TextWrapping="NoWrap" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

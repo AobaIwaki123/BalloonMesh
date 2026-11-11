@@ -1,5 +1,5 @@
 using BalloonMesh.Server.Models;
-using BalloonMesh.Server.Protocol;
+using BalloonMesh.Protocol;
 using BalloonMesh.Server.Services;
 
 namespace BalloonMesh.Server.Tests;

@@ -1,0 +1,62 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BalloonMesh.DebugTool.ViewModels"
+             x:Class="BalloonMesh.DebugTool.Views.ProtocolView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+
+    <ScrollViewer>
+        <StackPanel Spacing="8" Margin="4">
+            <Border Classes="card">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="Build from a preset" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Preset" VerticalAlignment="Center" />
+                        <ComboBox Width="200" ItemsSource="{Binding ProtocolPresets}"
+                                  SelectedItem="{Binding ProtocolPreset}" />
+                        <Button Content="Build" Command="{Binding BuildProtocolMessageCommand}" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Parameters are shared with the Commands and Gateway simulator tabs: execute time, RGB, FTM, queue and neighbor fields." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="Decode / raw payload" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Opcode" VerticalAlignment="Center" />
+                        <TextBox Width="140" Text="{Binding ProtocolOpcode}"
+                                 PlaceholderText="0xC102E5 or 0x01" />
+                        <Button Content="Decode" Command="{Binding DecodeProtocolMessageCommand}" />
+                        <CheckBox Content="Expand short opcodes (0x01..0x0C)"
+                                  IsChecked="{Binding ExpandShortOpcode}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Payload (hex)" VerticalAlignment="Center" />
+                        <TextBox Width="460" Text="{Binding ProtocolPayload}"
+                                 PlaceholderText="01020304..." />
+                    </StackPanel>
+                    <TextBlock Text="{Binding ProtocolSummary}" TextWrapping="Wrap"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ProtocolWarnings}" TextWrapping="Wrap"
+                               Foreground="#D9822B" />
+                    <Border BorderBrush="#33808080" BorderThickness="1" CornerRadius="4"
+                            Height="260">
+                        <ListBox ItemsSource="{Binding ProtocolFields}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:ProtocolFieldRow">
+                                    <Grid ColumnDefinitions="190,*">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                        <TextBlock Grid.Column="1" Text="{Binding Value}"
+                                                   TextWrapping="Wrap" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -12,13 +12,18 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The test project lives below this directory; keep it out of the web app. -->
+    <!-- The test project and the protocol class library live below this
+         directory; keep them out of the web app's default globs. -->
     <Compile Remove="BalloonMesh.Server.Tests\**\*.cs" />
     <Content Remove="BalloonMesh.Server.Tests\**" />
     <None Remove="BalloonMesh.Server.Tests\**" />
+    <Compile Remove="BalloonMesh.Protocol\**\*.cs" />
+    <Content Remove="BalloonMesh.Protocol\**" />
+    <None Remove="BalloonMesh.Protocol\**" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="BalloonMesh.Protocol\BalloonMesh.Protocol.csproj" />
     <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Core\SvelteSharp.Core.csproj" />
     <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Jint\SvelteSharp.Jint.csproj" />
     <ProjectReference Include="..\third_party\SvelteSharp\SvelteSharp.Build\SvelteSharp.Build.csproj" />

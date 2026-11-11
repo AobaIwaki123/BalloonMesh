@@ -1,0 +1,82 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BalloonMesh.DebugTool.ViewModels"
+             x:Class="BalloonMesh.DebugTool.Views.CommandsView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+
+    <ScrollViewer>
+        <StackPanel Spacing="8" Margin="4">
+            <Border Classes="card">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="Target" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Kind" VerticalAlignment="Center" />
+                        <ComboBox Width="120" ItemsSource="{Binding TargetKinds}"
+                                  SelectedItem="{Binding TargetKind}" />
+                        <TextBlock Text="Target" VerticalAlignment="Center" />
+                        <TextBox Width="180" Text="{Binding Target}"
+                                 PlaceholderText="all or 0x0101" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Use 'all' or an individual balloon address. Selecting a balloon on the Fleet tab fills this automatically." />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="Colour" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="R" VerticalAlignment="Center" />
+                        <TextBox Width="60" Text="{Binding Red}" />
+                        <TextBlock Text="G" VerticalAlignment="Center" />
+                        <TextBox Width="60" Text="{Binding Green}" />
+                        <TextBlock Text="B" VerticalAlignment="Center" />
+                        <TextBox Width="60" Text="{Binding Blue}" />
+                        <Border Width="40" Height="26" CornerRadius="4"
+                                BorderBrush="#33808080" BorderThickness="1"
+                                Background="{Binding CommandColorBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="8">
+                    <TextBlock Classes="h2" Text="Timing" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Execute at (UTC)" VerticalAlignment="Center" />
+                        <TextBox Width="280" Text="{Binding ExecuteAt}"
+                                 PlaceholderText="blank = now + 10s (Schedule only)" />
+                    </StackPanel>
+                    <TextBlock Classes="muted" TextWrapping="Wrap"
+                               Text="Cancel requires the reservation's exact execute time." />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Reset cutoff (UTC)" VerticalAlignment="Center" />
+                        <TextBox Width="280" Text="{Binding ResetCutoff}"
+                                 PlaceholderText="blank = now" />
+                        <CheckBox Content="Set colour on reset" IsChecked="{Binding ResetSetNow}" />
+                    </StackPanel>
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Content="Send now" Command="{Binding SendNowCommand}"
+                                Margin="0,0,8,8" />
+                        <Button Content="Schedule" Command="{Binding ScheduleCommand}"
+                                Margin="0,0,8,8" />
+                        <Button Content="Cancel" Command="{Binding CancelCommand}"
+                                Margin="0,0,8,8" />
+                        <Button Content="Reset" Command="{Binding ResetCommand}"
+                                Margin="0,0,8,8" />
+                        <Button Content="Reset + set" Command="{Binding ResetAndSetCommand}"
+                                Margin="0,0,8,8" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Classes="card">
+                <StackPanel Spacing="4">
+                    <TextBlock Classes="h2" Text="Last result" />
+                    <TextBlock Text="{Binding CommandResult}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
