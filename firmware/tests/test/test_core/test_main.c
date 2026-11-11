@@ -50,11 +50,59 @@ static void test_led_wire_formats(void) {
     neighbor.entries[1].mesh_addr = 0x00AA;
     neighbor.entries[1].rssi_dbm = -77;
     TEST_ASSERT_EQUAL_UINT(8, bm_encode_neighbor_report(buffer, sizeof(buffer), &neighbor));
+    /* 8 B layout: batch(1) + packet_index(1) + entry0(3) + entry1(3). */
+    TEST_ASSERT_EQUAL_UINT8(0x34, buffer[2]); /* 0x1234 little-endian */
+    TEST_ASSERT_EQUAL_UINT8(0x12, buffer[3]);
+    TEST_ASSERT_EQUAL_UINT8(-55, buffer[4]);
+    TEST_ASSERT_EQUAL_UINT8(0xAA, buffer[5]); /* 0x00AA little-endian */
+    TEST_ASSERT_EQUAL_UINT8(0x00, buffer[6]);
+    TEST_ASSERT_EQUAL_UINT8(-77, buffer[7]);
     bm_neighbor_report_t neighbor2;
     TEST_ASSERT_TRUE(bm_decode_neighbor_report(buffer, 8, &neighbor2));
     TEST_ASSERT_EQUAL_UINT8(2, neighbor2.entry_count);
     TEST_ASSERT_EQUAL_UINT16(0x1234, neighbor2.entries[0].mesh_addr);
     TEST_ASSERT_EQUAL_INT8(-77, neighbor2.entries[1].rssi_dbm);
+
+    /* A single-entry packet zero-fills the unused slot; the decoder derives
+     * entry_count from the non-zero mesh addresses. */
+    neighbor.entry_count = 1;
+    TEST_ASSERT_EQUAL_UINT(8, bm_encode_neighbor_report(buffer, sizeof(buffer), &neighbor));
+    TEST_ASSERT_EQUAL_UINT8(0, buffer[5]);
+    TEST_ASSERT_EQUAL_UINT8(0, buffer[6]);
+    TEST_ASSERT_EQUAL_UINT8(0, buffer[7]);
+    TEST_ASSERT_TRUE(bm_decode_neighbor_report(buffer, 8, &neighbor2));
+    TEST_ASSERT_EQUAL_UINT8(1, neighbor2.entry_count);
+    TEST_ASSERT_EQUAL_UINT16(0x1234, neighbor2.entries[0].mesh_addr);
+    TEST_ASSERT_EQUAL_UINT16(0, neighbor2.entries[1].mesh_addr);
+    TEST_ASSERT_FALSE(bm_decode_neighbor_report(buffer, 7, &neighbor2));
+}
+
+static void test_snapshot_fits_nvs_page(void) {
+    bm_led_queue_t queue;
+    bm_ledq_init(&queue);
+    bm_rgb_t rgb = {1, 2, 3};
+    for (uint32_t i = 0; i < BM_LED_QUEUE_CAPACITY; ++i) {
+        TEST_ASSERT_EQUAL(BM_LEDQ_APPLIED, bm_ledq_set(&queue, 1000 + i, rgb, 0, false));
+    }
+    for (uint8_t i = 0; i < BM_LED_TOMBSTONE_CAPACITY; ++i) {
+        TEST_ASSERT_EQUAL(BM_LEDQ_APPLIED, bm_ledq_cancel(&queue, 500 + i, 0, false));
+    }
+    TEST_ASSERT_EQUAL_UINT16(BM_LED_QUEUE_CAPACITY, queue.count);
+
+    size_t capacity = bm_ledq_serialized_size();
+    uint8_t *buffer = (uint8_t *)malloc(capacity);
+    TEST_ASSERT_NOT_NULL(buffer);
+    size_t written = bm_ledq_serialize(&queue, buffer, capacity);
+    TEST_ASSERT_GREATER_THAN(0, written);
+    /* The blob must stay within one 4 KiB NVS flash page. */
+    TEST_ASSERT_TRUE(written <= 4000);
+    bm_led_queue_t restored;
+    TEST_ASSERT_TRUE(bm_ledq_deserialize(&restored, buffer, written));
+    TEST_ASSERT_EQUAL_UINT16(BM_LEDQ_SNAPSHOT_MAX_TOTAL_ENTRIES - BM_LED_TOMBSTONE_CAPACITY,
+                             restored.count);
+    /* The soonest reservations are kept; the furthest future is dropped. */
+    TEST_ASSERT_EQUAL_UINT64(1000, bm_led_entry_tick(&restored.entries[0]));
+    free(buffer);
 }
 
 static void test_queue_raw_size_and_overwrite(void) {
@@ -285,6 +333,7 @@ int main(void) {
     RUN_TEST(test_set_now_and_execution);
     RUN_TEST(test_forward_resync_discards_without_executing);
     RUN_TEST(test_queue_snapshot_roundtrip);
+    RUN_TEST(test_snapshot_fits_nvs_page);
     RUN_TEST(test_queue_monitor_hysteresis);
     RUN_TEST(test_time_codec);
     RUN_TEST(test_nmea_parser);

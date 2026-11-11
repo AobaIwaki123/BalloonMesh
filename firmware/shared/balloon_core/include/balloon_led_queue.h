@@ -114,7 +114,14 @@ uint16_t bm_ledq_discard_through(bm_led_queue_t *queue, uint64_t tick);
 /* 1 = NEAR_FULL notification, 2 = RECOVERED notification, 0 = none. */
 int bm_queue_monitor_update(bm_queue_monitor_t *monitor, uint16_t queue_count);
 
-/* Fixed binary snapshot used by the balloon NVS persistence layer. */
+/* Fixed binary snapshot used by the balloon NVS persistence layer.
+ *
+ * A variable-length NVS entry must fit a single 4 KiB flash page (practical
+ * maximum ~4000 B).  37 + 495 * 8 = 3997 B, so at most 495 queued entries and
+ * tombstones in total are persisted; when the live queue is larger the
+ * furthest-future reservations are dropped (near reservations are protected,
+ * matching the queue capacity policy). */
+#define BM_LEDQ_SNAPSHOT_MAX_TOTAL_ENTRIES 495u
 size_t bm_ledq_serialized_size(void);
 size_t bm_ledq_serialize(const bm_led_queue_t *queue, uint8_t *out, size_t out_len);
 bool bm_ledq_deserialize(bm_led_queue_t *queue, const uint8_t *data, size_t length);

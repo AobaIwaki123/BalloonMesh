@@ -196,11 +196,10 @@ size_t bm_encode_neighbor_report(uint8_t *out, size_t out_len, const bm_neighbor
     }
     out[0] = value->batch_id;
     out[1] = value->packet_index;
-    out[2] = value->entry_count;
-    memset(&out[3], 0, 6);
+    memset(&out[2], 0, 6);
     for (uint8_t i = 0; i < value->entry_count; ++i) {
-        write_u16_le(&out[3 + i * 3], value->entries[i].mesh_addr);
-        out[3 + i * 3 + 2] = (uint8_t)value->entries[i].rssi_dbm;
+        write_u16_le(&out[2 + i * 3], value->entries[i].mesh_addr);
+        out[2 + i * 3 + 2] = (uint8_t)value->entries[i].rssi_dbm;
     }
     return 8;
 }
@@ -209,15 +208,19 @@ bool bm_decode_neighbor_report(const uint8_t *data, size_t len, bm_neighbor_repo
     if (data == NULL || out == NULL || len != 8) {
         return false;
     }
+    memset(out, 0, sizeof(*out));
     out->batch_id = data[0];
     out->packet_index = data[1];
-    out->entry_count = data[2];
-    if (out->entry_count > BM_NEIGHBOR_REPORT_MAX_ENTRIES) {
-        return false;
-    }
+    /* A slot whose mesh_addr is 0 is unused; valid entries are compacted to
+     * the front of entries[] and entry_count is derived from the packet. */
     for (uint8_t i = 0; i < BM_NEIGHBOR_REPORT_MAX_ENTRIES; ++i) {
-        out->entries[i].mesh_addr = read_u16_le(&data[3 + i * 3]);
-        out->entries[i].rssi_dbm = (int8_t)data[3 + i * 3 + 2];
+        uint16_t mesh_addr = read_u16_le(&data[2 + i * 3]);
+        if (mesh_addr == 0u) {
+            continue;
+        }
+        out->entries[out->entry_count].mesh_addr = mesh_addr;
+        out->entries[out->entry_count].rssi_dbm = (int8_t)data[2 + i * 3 + 2];
+        ++out->entry_count;
     }
     return true;
 }

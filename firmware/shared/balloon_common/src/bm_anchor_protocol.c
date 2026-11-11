@@ -65,7 +65,7 @@ size_t bm_anchor_response_encode(uint8_t *out,
     memcpy(&out[20], &lon_e7, 4);
     memcpy(&out[24], &alt_cm, 4);
     memcpy(&out[28], &h_acc_cm, 2);
-    memcpy(&out[32], token, 8);
+    memcpy(&out[30], token, 8);
     uint16_t crc = bm_crc16_ccitt(out, BM_ANCHOR_RESPONSE_SIZE - 2);
     memcpy(&out[38], &crc, 2);
     return BM_ANCHOR_RESPONSE_SIZE;

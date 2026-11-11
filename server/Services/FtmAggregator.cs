@@ -221,6 +221,17 @@ public sealed class FtmAggregator
                     constraints.Count(c => c.Source == "ftm"));
                 computed++;
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                // One failed batch must not abort the rest of the due list;
+                // closed batches cannot be recomputed, so only log here.
+                _logger.LogError(exception, "position computation failed for {Source:X4}/{Batch}",
+                    item.Key.Source, item.Key.Batch);
+            }
             finally
             {
                 if (item.IsFinal)
