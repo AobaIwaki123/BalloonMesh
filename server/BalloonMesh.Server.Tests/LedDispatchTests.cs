@@ -97,7 +97,7 @@ public sealed class LedDispatchTests
     }
 
     [Fact]
-    public async Task CommandServiceAcceptsCommandsWithoutGateways()
+    public async Task ImmediateCommandsRequireAReachableGateway()
     {
         using var database = new TemporaryDatabase();
         var fleet = new FleetService(database.Store);
@@ -110,21 +110,26 @@ public sealed class LedDispatchTests
             fleet, dispatch, registry, database.Store, events, time,
             NullLogger<CommandService>.Instance);
 
+        // Without a reachable gateway the immediate commands are rejected and
+        // must NOT be applied optimistically to the fleet colours.
         var now = await commands.SetNowAsync(new LedNowRequest("all", "all", 1, 2, 3), default);
-        Assert.True(now.Accepted);
+        Assert.False(now.Accepted);
         Assert.Equal(0, now.Gateways);
+        Assert.Equal(0, (int)fleet.GetBalloon(0x0101)!.R);
 
+        var reset = await commands.ResetAsync(
+            new LedResetRequest("all", "all", null, true, 7, 8, 9), default);
+        Assert.False(reset.Accepted);
+        Assert.NotNull(reset.Payload);
+        Assert.Equal(0, (int)fleet.GetBalloon(0x0101)!.R);
+
+        // Scheduled reservations are different: they stay pending until a
+        // gateway appears (or they expire at ExecuteAt).
         var scheduled = await commands.ScheduleAsync(
             new LedSetRequest("all", "all", time.GetUtcNow().AddMinutes(2), 4, 5, 6), default);
         Assert.True(scheduled.Accepted);
         Assert.NotNull(scheduled.Payload);
         Assert.Equal(16, scheduled.Payload!.Length); // 8 bytes in hex
-
-        var reset = await commands.ResetAsync(
-            new LedResetRequest("all", "all", null, true, 7, 8, 9), default);
-        Assert.True(reset.Accepted);
-        Assert.NotNull(reset.Payload);
-        Assert.Equal(16, reset.Payload!.Length);
 
         var showSteps = database.Store.GetShowSteps(10);
         Assert.Single(showSteps);
@@ -136,8 +141,27 @@ public sealed class LedDispatchTests
         Assert.Equal(1, await recovery.RecoverAsync());
         Assert.Equal(1, recoveryDispatch.PendingCount);
 
+        // A queued show step cannot be cancelled while the tombstone cannot
+        // be delivered; it stays queued.
+        var failedCancel = await commands.CancelShowStepAsync(showSteps[0].Id, default);
+        Assert.NotNull(failedCancel);
+        Assert.False(failedCancel!.Accepted);
+        Assert.Equal("queued", database.Store.GetShowStep(showSteps[0].Id)!.Status);
+
+        // Once a gateway is reachable the same commands are delivered and the
+        // colour is applied.
+        registry.GetOrRegister("gw-test");
+        var delivered = await commands.SetNowAsync(new LedNowRequest("all", "all", 1, 2, 3), default);
+        Assert.True(delivered.Accepted);
+        Assert.Equal(1, delivered.Gateways);
+        Assert.Contains("via 1 gateway", delivered.Message);
+        Assert.Equal(1, (int)fleet.GetBalloon(0x0101)!.R);
+        Assert.True(registry.TryReadCommand("gw-test", out var command));
+        Assert.Equal(BalloonProtocol.VendorOpcode(BalloonProtocol.OpLedSetNow), command!.Opcode);
+
         var cancelled = await commands.CancelShowStepAsync(showSteps[0].Id, default);
         Assert.NotNull(cancelled);
+        Assert.True(cancelled!.Accepted);
         Assert.Equal("canceled", database.Store.GetShowStep(showSteps[0].Id)!.Status);
     }
 

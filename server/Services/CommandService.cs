@@ -79,6 +79,13 @@ public sealed class CommandService
         var payload = BalloonProtocol.EncodeLedSetNow(tick, request.R, request.G, request.B);
         var gateways = _dispatch.SendImmediate(target, BalloonProtocol.OpLedSetNow, payload);
 
+        if (gateways == 0)
+        {
+            // Nothing left the server, so the stored colour must stay as-is.
+            return await RejectImmediateAsync(BalloonProtocol.OpLedSetNow, payload, target,
+                $"No reachable gateway; the colour was not sent to {target.Description}.");
+        }
+
         foreach (var balloon in target.Balloons)
         {
             var updated = _fleet.ApplyColor(balloon.MeshAddress, request.R, request.G, request.B);
@@ -87,7 +94,7 @@ public sealed class CommandService
 
         var result = new CommandResultDto(
             true,
-            $"Immediate colour sent to {target.Description}.",
+            $"Immediate colour sent to {target.Description} via {gateways} {GatewayLabel(gateways)}.",
             gateways,
             target.Balloons.Count,
             $"0x{BalloonProtocol.VendorOpcode(BalloonProtocol.OpLedSetNow):X6}",
@@ -103,11 +110,21 @@ public sealed class CommandService
         var tick = BalloonProtocol.Tick40FromUnixMs(executeAt.ToUnixTimeMilliseconds());
         var payload = BalloonProtocol.EncodeLedCancel(tick);
         var gateways = _dispatch.SendImmediate(target, BalloonProtocol.OpLedCancel, payload);
+
+        if (gateways == 0)
+        {
+            // The device tombstone must not be assumed; keep the server-side
+            // estimate untouched so the reservation can still be cancelled
+            // once a gateway returns.
+            return await RejectImmediateAsync(BalloonProtocol.OpLedCancel, payload, target,
+                $"No reachable gateway; the cancellation for {target.Description} was not sent.");
+        }
+
         _dispatch.NoteCancel(target.Balloons.Select(balloon => balloon.MeshAddress), tick);
 
         var result = new CommandResultDto(
             true,
-            $"Cancellation sent for {target.Description}.",
+            $"Cancellation sent for {target.Description} via {gateways} {GatewayLabel(gateways)}.",
             gateways,
             target.Balloons.Count,
             $"0x{BalloonProtocol.VendorOpcode(BalloonProtocol.OpLedCancel):X6}",
@@ -125,6 +142,12 @@ public sealed class CommandService
         }
         var result = await CancelAsync(
             new LedCancelRequest(step.TargetKind, step.Target, step.ExecuteAt), cancellationToken);
+        if (!result.Accepted)
+        {
+            // The reservation must stay queued: the devices never received the
+            // tombstone, so marking the step cancelled would lose it.
+            return result with { Message = $"Show step {id} is still queued: {result.Message}" };
+        }
         _store.UpdateShowStepStatus(id, "canceled");
         return result with { Message = $"Cancelled show step {id}. {result.Message}" };
     }
@@ -144,6 +167,13 @@ public sealed class CommandService
             ? BalloonProtocol.EncodeLedResetAndSet(cutoffTick, request.R, request.G, request.B)
             : BalloonProtocol.EncodeLedReset(cutoffTick);
         var gateways = _dispatch.SendImmediate(target, opcode, payload);
+
+        if (gateways == 0)
+        {
+            return await RejectImmediateAsync(opcode, payload, target,
+                $"No reachable gateway; the reset for {target.Description} was not sent.");
+        }
+
         _dispatch.NoteCutoff(addresses, cutoffTick);
 
         if (request.SetNow)
@@ -158,8 +188,8 @@ public sealed class CommandService
         var result = new CommandResultDto(
             true,
             request.SetNow
-                ? $"Reset + immediate colour sent for {target.Description}."
-                : $"Reset sent for {target.Description}.",
+                ? $"Reset + immediate colour sent for {target.Description} via {gateways} {GatewayLabel(gateways)}."
+                : $"Reset sent for {target.Description} via {gateways} {GatewayLabel(gateways)}.",
             gateways,
             target.Balloons.Count,
             $"0x{BalloonProtocol.VendorOpcode(opcode):X6}",
@@ -167,4 +197,20 @@ public sealed class CommandService
         await _notifier.CommandSentAsync(result);
         return result;
     }
+
+    private async Task<CommandResultDto> RejectImmediateAsync(
+        byte opcode, byte[] payload, TargetSpec target, string message)
+    {
+        var rejected = new CommandResultDto(
+            false,
+            message,
+            0,
+            target.Balloons.Count,
+            $"0x{BalloonProtocol.VendorOpcode(opcode):X6}",
+            Convert.ToHexString(payload));
+        await _notifier.CommandSentAsync(rejected);
+        return rejected;
+    }
+
+    private static string GatewayLabel(int gateways) => gateways == 1 ? "gateway" : "gateways";
 }
