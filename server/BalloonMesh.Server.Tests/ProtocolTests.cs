@@ -56,4 +56,35 @@ public sealed class ProtocolTests
         Assert.True(BalloonProtocol.TimestampNotNewer(uint.MaxValue - 1, 0));
         Assert.False(BalloonProtocol.TimestampNotNewer(1, uint.MaxValue - 1));
     }
+
+    [Fact]
+    public void NeighborReportCodecReadsEightBytePackets()
+    {
+        var payload = new byte[]
+        {
+            3,                 // batch id
+            1,                 // packet index
+            0x34, 0x12, 201,   // entry 0: 0x1234, rssi (sbyte)201 = -55
+            0xAA, 0x00, 179,   // entry 1: 0x00AA, rssi (sbyte)179 = -77
+        };
+        Assert.True(BalloonProtocol.TryDecodeNeighborReport(payload, out var report));
+        Assert.Equal(3, report.BatchId);
+        Assert.Equal(1, report.PacketIndex);
+        Assert.Equal(2, report.Entries.Count);
+        Assert.Equal((ushort)0x1234, report.Entries[0].MeshAddress);
+        Assert.Equal((sbyte)-55, report.Entries[0].RssiDbm);
+        Assert.Equal((ushort)0x00AA, report.Entries[1].MeshAddress);
+        Assert.Equal((sbyte)-77, report.Entries[1].RssiDbm);
+
+        // An unused slot is zero-filled and yields no entry.
+        payload[5] = 0;
+        payload[6] = 0;
+        payload[7] = 0;
+        Assert.True(BalloonProtocol.TryDecodeNeighborReport(payload, out report));
+        Assert.Single(report.Entries);
+        Assert.Equal((ushort)0x1234, report.Entries[0].MeshAddress);
+
+        Assert.False(BalloonProtocol.TryDecodeNeighborReport(payload.AsSpan(0, 7), out _));
+        Assert.False(BalloonProtocol.TryDecodeNeighborReport(ReadOnlySpan<byte>.Empty, out _));
+    }
 }

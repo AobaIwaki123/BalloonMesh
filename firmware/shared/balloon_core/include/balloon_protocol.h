@@ -86,7 +86,10 @@ typedef struct {
     int8_t rssi_dbm;
 } bm_neighbor_entry_t;
 
-/* Two neighbour observations per packet is the default local decision. */
+/* Two neighbour observations per packet is the default local decision.
+ * Wire layout (8 B): batch_id(1) + packet_index(1) + entry0(3) + entry1(3),
+ * each entry being mesh_addr LE(2) + rssi int8(1).  A slot whose mesh_addr
+ * is 0 is unused and zero-filled, so entry_count is implicit on the wire. */
 #define BM_NEIGHBOR_REPORT_MAX_ENTRIES 2u
 
 typedef struct {

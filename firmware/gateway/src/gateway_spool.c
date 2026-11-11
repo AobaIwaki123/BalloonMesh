@@ -110,22 +110,20 @@ static void load_from_nvs(void) {
 }
 
 static bool save_to_nvs(void) {
-    bm_gateway_event_t snapshot[BM_SPOOL_CAPACITY];
+    uint8_t *buffer;
+    size_t length;
     uint16_t count;
+    /* Encode into the heap blob while holding the lock: a full snapshot
+     * (128 * 24 B) would not fit on the save task's stack. */
     if (xSemaphoreTake(s_spool.lock, pdMS_TO_TICKS(200)) != pdTRUE) {
         return false;
     }
     count = s_spool.count;
-    for (uint16_t i = 0; i < count; ++i) {
-        snapshot[i] = s_spool.events[(s_spool.head + i) % BM_SPOOL_CAPACITY];
-    }
-    s_spool.dirty = false;
-    xSemaphoreGive(s_spool.lock);
-
-    size_t length = BM_SPOOL_HEADER + (size_t)count * BM_SPOOL_EVENT_BYTES;
-    uint8_t *buffer = (uint8_t *)malloc(length);
+    length = BM_SPOOL_HEADER + (size_t)count * BM_SPOOL_EVENT_BYTES;
+    buffer = (uint8_t *)malloc(length);
     if (buffer == NULL) {
         s_spool.dirty = true;
+        xSemaphoreGive(s_spool.lock);
         return false;
     }
     memset(buffer, 0, length);
@@ -137,8 +135,11 @@ static bool save_to_nvs(void) {
     write_u16(&buffer[6], count);
     write_u16(&buffer[8], 0);
     for (uint16_t i = 0; i < count; ++i) {
-        encode_event(&buffer[BM_SPOOL_HEADER + (size_t)i * BM_SPOOL_EVENT_BYTES], &snapshot[i]);
+        encode_event(&buffer[BM_SPOOL_HEADER + (size_t)i * BM_SPOOL_EVENT_BYTES],
+                     &s_spool.events[(s_spool.head + i) % BM_SPOOL_CAPACITY]);
     }
+    s_spool.dirty = false;
+    xSemaphoreGive(s_spool.lock);
 
     nvs_handle_t handle;
     esp_err_t err = nvs_open(BM_NVS_NAMESPACE, NVS_READWRITE, &handle);
