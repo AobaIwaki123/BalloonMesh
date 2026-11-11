@@ -17,17 +17,16 @@
 
 ## 2. NEIGHBOR_REPORT のパケット形式
 
-**暫定:** 2 件/非分割パケット、最大 5 パケットで 10 台。
+**暫定:** 2 件/非分割パケット(合計 8B)、最大 5 パケットで 10 台。
 
 | Offset | Size | 内容 |
 |---|---:|---|
 | 0 | 1B | `batch_id` |
 | 1 | 1B | `packet_index` (0〜4) |
-| 2 | 1B | `entry_count` (0〜2) |
-| 3–5 | 3B | entry 0: `mesh_addr` LE 2B + `rssi_dbm` int8 |
-| 6–8 | 3B | entry 1: `mesh_addr` LE 2B + `rssi_dbm` int8 |
+| 2–4 | 3B | entry 0: `mesh_addr` LE 2B + `rssi_dbm` int8 |
+| 5–7 | 3B | entry 1: `mesh_addr` LE 2B + `rssi_dbm` int8 |
 
-`entry_count` が 1 のとき entry 1 は 0 埋め。並び順は RSSI 中央値の強い順。
+エントリ数フィールドは廃止した。非分割アクセスメッセージのペイロード上限が 8B のため、未使用スロットを `mesh_addr = 0`(0 埋め)で表現し、受信側は 0 以外のスロットだけを有効エントリとして扱う。`mesh_addr = 0` は Mesh ユニキャストアドレスとして無効なため衝突しない。並び順は RSSI 中央値の強い順。
 
 ## 3. Vendor Opcode / Model / Group
 
@@ -147,7 +146,7 @@ Arduino を維持する場合の推奨確認手順:
 
 ## 13. 実装済みの追加項目
 
-- バルーン LED キューの NVS スナップショット保存・復元（2 秒 debounce）
+- バルーン LED キューの NVS スナップショット保存・復元（2 秒 debounce）。スナップショットは NVS の 1 ページ（実質約 4KB）に収まるよう合計 495 件（予約 + tombstone）を上限とし、あふれた場合は最も遠い未来の予約から落とす
 - サーバのグループ作成・バルーン移動・空グループ削除（`FleetService` / `DataStore`。HTTP API / UI は未公開）
 - 予約コマンド一覧と LED_CANCEL 連携キャンセル
 - Gateway の WebSocket（WSS 対応）/ HTTPS HTTP ポーリング二系統

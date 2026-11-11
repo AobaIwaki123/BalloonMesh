@@ -102,7 +102,7 @@ cd firmware/tests
 pio test -e native
 ```
 
-（13 tests）
+（14 tests）
 
 ## 認証・認可
 
@@ -266,7 +266,7 @@ pio run -t upload
 - グループの作成・バルーン移動・空グループ削除（`FleetService` / `DataStore`。HTTP API / UI は未公開）
 - 予約一覧と LED_CANCEL 連携のキャンセル
 - 個体別 Provisioning UUID（Bluetooth MAC 由来）
-- 基準局が使えない場合の Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT）
+- 基準局が使えない場合の Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT。バルーン間で交換し、サーバは透過転送のみ）
 - Gateway の NVS オフラインスプール（128 件、再接続後に再送）
 - Gateway 共有トークン認証（`Gateway:Token` / `X-Gateway-Token`）
 - UI の Gateway 状態（prov/unprov、spool 件数、transport）
@@ -297,7 +297,7 @@ pio run -t upload
 | FTM_REPORT | `0x07`, 8B |
 | NEIGHBOR_REQUEST | `0x08`, 0B |
 | NEIGHBOR_PROBE | `0x09`, 0B |
-| NEIGHBOR_REPORT | `0x0A`, 8B（2 件/パケット） |
+| NEIGHBOR_REPORT | `0x0A`, 8B（2 件/パケット、未使用スロットは `mesh_addr=0` の 0 埋め） |
 | TIME_REQUEST | `0x0B`, 0B（Mesh 時刻フォールバック） |
 | TIME_REPORT | `0x0C`, 8B（UTC ms、LE） |
 

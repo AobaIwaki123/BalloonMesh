@@ -154,9 +154,9 @@ public sealed class FleetService
     public IReadOnlyList<PositionSampleRecord> GetHistory(ushort meshAddress, int limit) =>
         _store.GetHistory(meshAddress, limit);
 
-    public TargetSpec ResolveTarget(string kind, string target)
+    public TargetSpec ResolveTarget(string? kind, string? target)
     {
-        var normalized = kind.Trim().ToLowerInvariant();
+        var normalized = (kind ?? string.Empty).Trim().ToLowerInvariant();
         if (normalized is "all" or "everyone")
         {
             return new TargetSpec(
@@ -172,7 +172,7 @@ public sealed class FleetService
 
         if (normalized is "balloon" or "node")
         {
-            if (!TryParseUShort(target, out var address))
+            if (!TryParseUShort(target ?? string.Empty, out var address))
             {
                 throw new ArgumentException($"Balloon address '{target}' is invalid.");
             }

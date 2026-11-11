@@ -49,6 +49,13 @@ var dataStore = app.Services.GetRequiredService<DataStore>();
 dataStore.Initialize();
 dataStore.ResetRuntimeQueueState();
 
+if (string.IsNullOrWhiteSpace(GatewayAuth.ConfiguredToken(app.Configuration)) &&
+    !app.Environment.IsDevelopment())
+{
+    app.Logger.LogWarning(
+        "Gateway:Token is not configured; /ws/gateway and /api/gateway/* accept unauthenticated clients.");
+}
+
 app.UseWebSockets(new WebSocketOptions
 {
     KeepAliveInterval = TimeSpan.FromSeconds(30)
@@ -309,6 +316,10 @@ app.MapPost("/api/gateway/{id}/events",
         if (request.SpoolPending is { } spoolPending)
         {
             client.SpoolPending = spoolPending;
+        }
+        if (request.Events is null)
+        {
+            return Results.BadRequest(new { error = "events is required." });
         }
         var accepted = 0;
         foreach (var message in request.Events)

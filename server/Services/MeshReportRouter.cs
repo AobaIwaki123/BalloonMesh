@@ -31,6 +31,11 @@ public sealed class MeshReportRouter
 
     public int Handle(GatewayEventDto message, string gatewayId)
     {
+        if (message.Payload is null)
+        {
+            _logger.LogWarning("Gateway {Gateway} sent an event without a payload", gatewayId);
+            return 0;
+        }
         byte[] payload;
         try
         {

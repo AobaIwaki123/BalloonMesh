@@ -154,20 +154,28 @@ public static class BalloonProtocol
         return true;
     }
 
+    /// <summary>
+    /// Decodes the 8-byte NEIGHBOR_REPORT packet: batch(1) + packetIndex(1)
+    /// + up to two entries of address(2 LE) + rssi(1).  A slot whose address
+    /// is 0 is unused and zero-filled, so entries are implicit on the wire.
+    /// </summary>
     public static bool TryDecodeNeighborReport(ReadOnlySpan<byte> payload, out NeighborReport report)
     {
-        if (payload.Length != 8 || payload[2] > 2)
+        if (payload.Length != 8)
         {
             report = default;
             return false;
         }
-        var entries = new List<NeighborEntry>(payload[2]);
-        for (var i = 0; i < payload[2]; i++)
+        var entries = new List<NeighborEntry>(2);
+        for (var i = 0; i < 2; i++)
         {
-            var offset = 3 + i * 3;
-            entries.Add(new NeighborEntry(
-                BinaryPrimitives.ReadUInt16LittleEndian(payload[offset..(offset + 2)]),
-                (sbyte)payload[offset + 2]));
+            var offset = 2 + i * 3;
+            var address = BinaryPrimitives.ReadUInt16LittleEndian(payload[offset..(offset + 2)]);
+            if (address == 0)
+            {
+                continue;
+            }
+            entries.Add(new NeighborEntry(address, (sbyte)payload[offset + 2]));
         }
         report = new NeighborReport(payload[0], payload[1], entries);
         return true;

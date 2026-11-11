@@ -336,17 +336,27 @@ static uint64_t snapshot_read_u64(const uint8_t *data) {
 
 size_t bm_ledq_serialized_size(void) {
     return BM_LEDQ_SNAPSHOT_HEADER +
-           (size_t)(BM_LED_QUEUE_CAPACITY + BM_LED_TOMBSTONE_CAPACITY) * 8u;
+           (size_t)BM_LEDQ_SNAPSHOT_MAX_TOTAL_ENTRIES * 8u;
 }
 
 size_t bm_ledq_serialize(const bm_led_queue_t *queue, uint8_t *out, size_t out_len) {
     if (queue == NULL || out == NULL) {
         return 0;
     }
-    size_t required = BM_LEDQ_SNAPSHOT_HEADER +
-                      (size_t)(queue->count + queue->tombstone_count) * 8u;
+    size_t total = (size_t)queue->count + queue->tombstone_count;
+    if (total > BM_LEDQ_SNAPSHOT_MAX_TOTAL_ENTRIES) {
+        total = BM_LEDQ_SNAPSHOT_MAX_TOTAL_ENTRIES;
+    }
+    size_t required = BM_LEDQ_SNAPSHOT_HEADER + total * 8u;
     if (out_len < required) {
         return 0;
+    }
+    /* Entries are sorted by tick, so when the snapshot is capped the
+     * soonest reservations are kept and the furthest future is dropped. */
+    uint16_t persisted = queue->count;
+    size_t max_entries = (size_t)(BM_LEDQ_SNAPSHOT_MAX_TOTAL_ENTRIES - queue->tombstone_count);
+    if (persisted > max_entries) {
+        persisted = (uint16_t)max_entries;
     }
     memset(out, 0, required);
     out[0] = 'B';
@@ -359,7 +369,7 @@ size_t bm_ledq_serialize(const bm_led_queue_t *queue, uint8_t *out, size_t out_l
     if (queue->has_last_now) flags |= BM_LEDQ_SNAPSHOT_FLAG_LAST_NOW;
     if (queue->has_last_executed) flags |= BM_LEDQ_SNAPSHOT_FLAG_LAST_EXECUTED;
     out[5] = flags;
-    snapshot_write_u16(&out[6], queue->count);
+    snapshot_write_u16(&out[6], persisted);
     snapshot_write_u64(&out[8], queue->cutoff_tick);
     snapshot_write_u64(&out[16], queue->last_now_tick);
     snapshot_write_u64(&out[24], queue->last_executed_tick);
@@ -370,7 +380,7 @@ size_t bm_ledq_serialize(const bm_led_queue_t *queue, uint8_t *out, size_t out_l
     out[36] = queue->tombstone_next;
 
     size_t offset = BM_LEDQ_SNAPSHOT_HEADER;
-    for (uint16_t i = 0; i < queue->count; ++i) {
+    for (uint16_t i = 0; i < persisted; ++i) {
         memcpy(&out[offset], &queue->entries[i], sizeof(queue->entries[i]));
         offset += sizeof(queue->entries[i]);
     }
