@@ -63,6 +63,17 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
 #define BM_LED_PWM_FREQ_HZ 5000
 #define BM_LED_PWM_RESOLUTION 8
 
+/* Perceptual gamma applied to the physical LED output only.  Linear duty
+ * makes low colour values look far brighter than intended (the eye is
+ * non-linear and 1W-class chips stay bright even at small duty), so the
+ * commanded 0-255 value is mapped through (value/255)^gamma before it
+ * reaches LEDC.  Colours stored in the queue/DB/NVS stay linear 0-255;
+ * only bm_led_output_set() applies the curve.  Override per deployment
+ * with -DBM_LED_GAMMA=0 (linear) or e.g. -DBM_LED_GAMMA=2.8. */
+#ifndef BM_LED_GAMMA
+#define BM_LED_GAMMA 2.2f
+#endif
+
 /* Anchor UART (NMEA). */
 #define BM_GPS_UART_PORT 1
 #define BM_GPS_TX_GPIO 6
