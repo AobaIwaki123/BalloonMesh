@@ -1,5 +1,6 @@
 #include "gateway_mesh.h"
 
+#include <errno.h>
 #include <string.h>
 
 #include "esp_bt.h"
@@ -51,8 +52,18 @@ static esp_ble_mesh_model_t s_root_models[] = {
     ESP_BLE_MESH_MODEL_HEALTH_SRV(&s_health_server, &s_health_pub),
 };
 
+/* The downlink sender must be a vendor CLIENT model.  ESP-IDF's
+ * esp_ble_mesh_client_model_send_msg() resolves model->user_data as an
+ * esp_ble_mesh_client_t and returns -EINVAL ("Invalid client user data")
+ * when it is NULL, so a plain send-only vendor model cannot transmit. */
+static esp_ble_mesh_client_t s_control_client;
+static esp_ble_mesh_model_op_t s_control_client_ops[] = {
+    ESP_BLE_MESH_MODEL_OP_END, /* send-only; LED opcodes are handled by the balloons */
+};
+
 static esp_ble_mesh_model_t s_vendor_models[] = {
-    ESP_BLE_MESH_VENDOR_MODEL(BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, NULL, NULL, NULL),
+    ESP_BLE_MESH_VENDOR_MODEL(BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL,
+                              s_control_client_ops, NULL, &s_control_client),
     ESP_BLE_MESH_VENDOR_MODEL(BM_COMPANY_ID_LOCAL, BM_MODEL_ID_TELEMETRY,
                               s_telemetry_ops, NULL, NULL),
 };
@@ -73,7 +84,7 @@ static esp_ble_mesh_prov_t s_prov = {
     .uuid = s_prov_uuid,
 };
 
-static void subscribe_telemetry_groups(void) {
+static void configure_vendor_models(void) {
     uint16_t addr = esp_ble_mesh_get_primary_element_address();
     if (addr == ESP_BLE_MESH_ADDR_UNASSIGNED) {
         return;
@@ -89,16 +100,41 @@ static void subscribe_telemetry_groups(void) {
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "subscribe 0x%04x: %s", BM_GROUP_GATEWAY, esp_err_to_name(err));
     }
+    /* Both directions need this bind: access.c silently drops received
+     * messages whose app_idx is not bound to the target model, and rejects
+     * sends from unbound models (model_has_key).  Bind both vendor models
+     * to AppKey 0 locally instead of relying on the provisioner to send
+     * Config Model App Bind.  Requires AppKey 0 to exist (added during
+     * provisioning); results arrive via ESP_BLE_MESH_NODE_BIND_APP_KEY_
+     * TO_MODEL_COMP_EVT. */
+    const uint16_t model_ids[] = { BM_MODEL_ID_CONTROL, BM_MODEL_ID_TELEMETRY };
+    for (size_t i = 0; i < sizeof(model_ids) / sizeof(model_ids[0]); ++i) {
+        err = esp_ble_mesh_node_bind_app_key_to_local_model(
+            addr, BM_COMPANY_ID_LOCAL, model_ids[i], BM_APP_IDX);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "bind request for model 0x%04x failed: %s",
+                     model_ids[i], esp_err_to_name(err));
+        }
+    }
     ESP_LOGI(TAG, "gateway mesh primary address 0x%04x", addr);
 }
 
 static void prov_cb(esp_ble_mesh_prov_cb_event_t event,
                     esp_ble_mesh_prov_cb_param_t *param) {
-    (void)param;
     if (event == ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT) {
         s_provisioned = true;
         s_primary_addr = esp_ble_mesh_get_primary_element_address();
-        subscribe_telemetry_groups();
+        configure_vendor_models();
+    } else if (event == ESP_BLE_MESH_NODE_BIND_APP_KEY_TO_MODEL_COMP_EVT) {
+        /* esp_ble_mesh_node_bind_app_key_to_local_model() is async; the
+         * actual result arrives here.  EALREADY just means the bind
+         * survived from a previous run (CONFIG_BLE_MESH_SETTINGS). */
+        int bind_err = param->node_bind_app_key_to_model_comp.err_code;
+        if (bind_err != ESP_OK && bind_err != -EALREADY) {
+            ESP_LOGW(TAG, "bind model 0x%04x to AppKey %u failed: %d",
+                     param->node_bind_app_key_to_model_comp.model_id,
+                     BM_APP_IDX, bind_err);
+        }
     } else if (event == ESP_BLE_MESH_NODE_PROV_RESET_EVT) {
         s_provisioned = false;
         s_primary_addr = ESP_BLE_MESH_ADDR_UNASSIGNED;
@@ -156,11 +192,14 @@ void bm_gateway_mesh_init(void) {
     ESP_ERROR_CHECK(esp_ble_mesh_register_health_server_callback(health_server_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_custom_model_callback(custom_model_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_init(&s_prov, &s_composition));
+    /* Allocates the client's internal_data; without it every
+     * esp_ble_mesh_client_model_send_msg() fails with -EINVAL. */
+    ESP_ERROR_CHECK(esp_ble_mesh_client_model_init(&s_vendor_models[0]));
 
     if (esp_ble_mesh_node_is_provisioned()) {
         s_provisioned = true;
         s_primary_addr = esp_ble_mesh_get_primary_element_address();
-        subscribe_telemetry_groups();
+        configure_vendor_models();
     } else {
         ESP_ERROR_CHECK(esp_ble_mesh_node_prov_enable(
             (esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT)));
