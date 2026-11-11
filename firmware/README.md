@@ -19,6 +19,8 @@ firmware/
 .\build-all.ps1
 ```
 
+初回は ESP-IDF の Bluetooth スタックを含めてソースからビルドするため時間がかかります。並列ビルドは `pio run -j 12` のように指定できます。2 回目以降は差分ビルドです。
+
 ## Build individually
 ```powershell
 cd balloon
@@ -83,12 +85,18 @@ balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 8bit** �
 - Gateway は未送信 Mesh イベントを NVS に最大 128 件保持し、WebSocket/HTTP 再接続後に再送
 - Gateway は `BM_GATEWAY_TOKEN` を hello / `X-Gateway-Token` ヘッダで送信
 - サーバ側 `Gateway:Token` と一致しない接続は拒否
+- `balloon` / `gateway` は BLE Mesh 設定を NVS に保存し、再起動後も Provisioning 状態と group subscription を復元
 
-## Arduino BLE Mesh の注意
+## BLE Mesh Node のビルド構成
 
-Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` が無効な構成でビルドされています。`balloon` はArduinoをESP-IDF 4.4.7のコンポーネントとして組み込み、`sdkconfig.defaults`でMesh Nodeを有効化してBluetoothスタックを再ビルドします。そのため、バルーン側では `-DCONFIG_BLE_MESH_NODE=1` を指定しません。
+Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` が無効な構成でビルドされています。`balloon` と `gateway` は Arduino を ESP-IDF 4.4.7 のコンポーネントとして組み込み、`sdkconfig.defaults` で Mesh Node と設定保存を有効化して Bluetooth スタックをソースからビルドします。そのため、どちらも `-DCONFIG_BLE_MESH_NODE=1` を指定せず、Arduino 同梱のプリビルド `libbt.a` も使いません。
 
-`gateway` は現時点ではArduino単体の構成で、Mesh Node対応を含むBluetoothスタックの再ビルドは未実施です。GatewayのESP-IDF統合と実機Provisioningは別途検証します。詳細は `../docs/decisions.md` を参照してください。
+- `CONFIG_BLE_MESH_SETTINGS=y` により、ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、SEQ/RPL が NVS に保存されます
+- Gateway は再起動後も Provisioning 済みのまま `0xC011` のテレメトリを受信できます
+- 初回ビルドは ESP-IDF 全体をコンパイルするため時間がかかります。2 回目以降は差分ビルドです
+- `CONFIG_BLE_MESH_MODEL_GROUP_COUNT` は既定値 3 のままで十分です（各モデルは 1 グループだけ購読）
+
+詳細は `../docs/decisions.md` の項目 12 を参照してください。
 
 ## Mesh 宛先の変更
 
