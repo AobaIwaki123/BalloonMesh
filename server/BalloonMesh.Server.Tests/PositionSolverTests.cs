@@ -74,6 +74,16 @@ public sealed class PositionSolverTests
     }
 
     [Fact]
+    public void SingleRangeWithoutPreviousPositionDoesNotInventAPoint()
+    {
+        var anchor = Offset(0, 0);
+        var solution = new PositionSolver().Solve(
+            [new RangeConstraint(anchor, 100, 1.0, "ftm")], null);
+
+        Assert.Null(solution);
+    }
+
+    [Fact]
     public void NeighborConstraintUsesLowerWeightButParticipates()
     {
         var target = Offset(20, 20);

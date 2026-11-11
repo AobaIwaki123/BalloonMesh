@@ -26,6 +26,11 @@ public sealed class PositionSolver
                 ? null
                 : new PositionSolution(previous.Value, 0.05, "previous-only", double.NaN);
         }
+        if (usable.Length == 1 && previous is null)
+        {
+            // A single range without a prior direction cannot define a point.
+            return null;
+        }
 
         var reference = previous ?? usable[0].Position;
         var metersPerDegreeLongitude = Math.Max(
@@ -47,27 +52,20 @@ public sealed class PositionSolver
         {
             var anchor = points[0];
             var distance = usable[0].DistanceMeters;
-            if (previous is { } prior)
+            var prior = previous!.Value;
+            var px = ToX(prior.Longitude);
+            var py = ToY(prior.Latitude);
+            var dx = px - anchor.X;
+            var dy = py - anchor.Y;
+            var length = Math.Sqrt(dx * dx + dy * dy);
+            if (length < 0.01)
             {
-                var px = ToX(prior.Longitude);
-                var py = ToY(prior.Latitude);
-                var dx = px - anchor.X;
-                var dy = py - anchor.Y;
-                var length = Math.Sqrt(dx * dx + dy * dy);
-                if (length < 0.01)
-                {
-                    dx = 0;
-                    dy = 1;
-                    length = 1;
-                }
-                x = anchor.X + dx / length * distance;
-                y = anchor.Y + dy / length * distance;
+                dx = 0;
+                dy = 1;
+                length = 1;
             }
-            else
-            {
-                x = anchor.X;
-                y = anchor.Y;
-            }
+            x = anchor.X + dx / length * distance;
+            y = anchor.Y + dy / length * distance;
             method = "single-range";
         }
         else if (usable.Length == 2)

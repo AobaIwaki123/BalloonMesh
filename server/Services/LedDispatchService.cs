@@ -65,7 +65,7 @@ public sealed class LedDispatchService
 
         lock (_gate)
         {
-            _pending.Add(new PendingReservation(
+            InsertPending(new PendingReservation(
                 target,
                 BalloonProtocol.OpLedSet,
                 BalloonProtocol.EncodeLedSet(executeTick, r, g, b),
@@ -73,7 +73,6 @@ public sealed class LedDispatchService
                 executeAt,
                 r, g, b,
                 showStepId));
-            _pending.Sort((left, right) => left.ExecuteAt.CompareTo(right.ExecuteAt));
         }
         return true;
     }
@@ -180,6 +179,7 @@ public sealed class LedDispatchService
 
         lock (_gate)
         {
+            var selectedCounts = new Dictionary<ushort, int>();
             foreach (var address in _estimates.Keys.ToArray())
             {
                 var estimate = GetEstimate(address);
@@ -201,9 +201,14 @@ public sealed class LedDispatchService
                     continue;
                 }
 
-                if (addresses.All(address => GetEstimate(address).EffectiveCount(nowTick) < TargetQueueDepth))
+                if (addresses.All(address =>
+                        GetEstimate(address).EffectiveCount(nowTick) + selectedCounts.GetValueOrDefault(address) < TargetQueueDepth))
                 {
                     sendList.Add(item);
+                    foreach (var address in addresses)
+                    {
+                        selectedCounts[address] = selectedCounts.GetValueOrDefault(address) + 1;
+                    }
                 }
             }
 
@@ -239,8 +244,7 @@ public sealed class LedDispatchService
             {
                 lock (_gate)
                 {
-                    _pending.Add(item);
-                    _pending.Sort((left, right) => left.ExecuteAt.CompareTo(right.ExecuteAt));
+                    InsertPending(item);
                 }
                 continue;
             }
@@ -282,6 +286,13 @@ public sealed class LedDispatchService
 
     private QueueEstimate GetEstimate(ushort address) =>
         _estimates.TryGetValue(address, out var estimate) ? estimate : new QueueEstimate();
+
+    private void InsertPending(PendingReservation reservation)
+    {
+        var index = _pending.Count;
+        while (index > 0 && _pending[index - 1].ExecuteAt > reservation.ExecuteAt) index--;
+        _pending.Insert(index, reservation);
+    }
 
     private void WriteEstimate(ushort address, QueueEstimate estimate)
     {
