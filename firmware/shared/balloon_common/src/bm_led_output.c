@@ -1,9 +1,31 @@
 #include "bm_led_output.h"
 
+#include <math.h>
+
 #include "driver/ledc.h"
 #include "esp_err.h"
 
 #include "bm_config.h"
+
+/* Maps commanded linear 0-255 values through (v/255)^gamma so the physical
+ * brightness slider matches perception; see BM_LED_GAMMA in bm_config.h. */
+static uint8_t s_gamma_lut[256];
+
+static void init_gamma_lut(void) {
+    for (int i = 0; i < 256; ++i) {
+        float gamma = (float)BM_LED_GAMMA;
+        float scaled;
+        if (gamma > 0.0f) {
+            scaled = 255.0f * powf((float)i / 255.0f, gamma) + 0.5f;
+            if (scaled > 255.0f) {
+                scaled = 255.0f;
+            }
+        } else {
+            scaled = (float)i;
+        }
+        s_gamma_lut[i] = (uint8_t)scaled;
+    }
+}
 
 static void configure_channel(ledc_channel_t channel, int gpio) {
     ledc_channel_config_t config = {
@@ -19,6 +41,7 @@ static void configure_channel(ledc_channel_t channel, int gpio) {
 }
 
 void bm_led_output_init(void) {
+    init_gamma_lut();
     ledc_timer_config_t timer = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = (ledc_timer_bit_t)BM_LED_PWM_RESOLUTION,
@@ -40,7 +63,7 @@ static void set_channel(ledc_channel_t channel, uint8_t value) {
 }
 
 void bm_led_output_set(uint8_t r, uint8_t g, uint8_t b) {
-    set_channel(LEDC_CHANNEL_0, r);
-    set_channel(LEDC_CHANNEL_1, g);
-    set_channel(LEDC_CHANNEL_2, b);
+    set_channel(LEDC_CHANNEL_0, s_gamma_lut[r]);
+    set_channel(LEDC_CHANNEL_1, s_gamma_lut[g]);
+    set_channel(LEDC_CHANNEL_2, s_gamma_lut[b]);
 }
