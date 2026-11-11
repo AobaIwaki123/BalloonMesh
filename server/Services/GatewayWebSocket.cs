@@ -28,8 +28,9 @@ public static class GatewayWebSocket
             {
                 return;
             }
-            using (var document = JsonDocument.Parse(hello))
+            try
             {
+                using var document = JsonDocument.Parse(hello);
                 var root = document.RootElement;
                 if (root.TryGetProperty("type", out var type)
                     && string.Equals(type.GetString(), "hello", StringComparison.OrdinalIgnoreCase)
@@ -61,6 +62,13 @@ public static class GatewayWebSocket
                         attachedClient.SpoolPending = spoolPending;
                     }
                 }
+            }
+            catch (JsonException exception)
+            {
+                logger.LogWarning(exception, "Gateway sent malformed hello JSON");
+                await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation,
+                    "invalid hello", linked.Token);
+                return;
             }
 
             if (string.IsNullOrWhiteSpace(gatewayId))

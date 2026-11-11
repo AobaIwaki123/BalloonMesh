@@ -91,7 +91,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、22 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、30 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 
@@ -112,7 +112,7 @@ Cookie 認証を基盤に、OIDC と Discord OAuth2 を利用できます。UI�
 |---|---|---|
 | Viewer | Viewer / Operator / Admin | 地図・状態・履歴の閲覧 |
 | Operator | Operator / Admin | LED 命令、初期位置、予約キャンセル |
-| Admin | Admin | グループ管理、基準局更新、デモ、オンボーディング操作 |
+| Admin | Admin | 基準局更新、グループ DB 管理、デモ、オンボーディング操作 |
 
 - 未ログインの API は `401`、権限不足は `403`
 - 未ログインのページは `/login` へリダイレクト
@@ -185,7 +185,7 @@ dotnet run --project server/BalloonMesh.Server.csproj --urls http://localhost:50
 - `POST /api/onboarding/mock/reset` — 初期状態へ戻す
 - SignalR `onboardingUpdated` で全 Admin に反映
 
-実際の Provisioner / 鍵配布 / model bind / group subscribe は未実装です。
+実際の Provisioner 本体 / 鍵配布 / model bind / グループ購読の自動化は未実装です（ファームウェアは Provision 完了後に固定グループへ subscribe します）。
 
 ### 4. ファームウェア
 
@@ -211,13 +211,14 @@ pio run -t upload
 | `firmware/anchor` | GPS 基準局 | NMEA UART、SoftAP、FTM Responder、UDP |
 | `firmware/gateway` | Mesh Gateway | BLE Mesh Node、WebSocket（既定）/ HTTP ポーリング |
 
-`anchor` は `platformio.ini` の `-DBM_ANCHOR_ID=N` で ID を変えてビルドします。`gateway` は `firmware/gateway/platformio.ini` の `BM_GATEWAY_ID` / `BM_SERVER_URL` / Wi-Fi 設定を環境に合わせて変更してください。
+`anchor` は `platformio.ini` の `-DBM_ANCHOR_ID=N` で ID を変えてビルドします。`gateway` は `firmware/gateway/platformio.ini` の `BM_GATEWAY_ID` / `BM_SERVER_URL` / Wi-Fi 設定を環境に合わせて変更してください。`balloon` は通常の `balloon` 環境に加え、測位を無効化した BLE Mesh 立ち上げ用の `balloon-mesh-bringup` 環境も利用できます。
 
 一括ビルド:
 
-``powershell
+```powershell
 .\firmware\build-all.ps1
-``n
+```
+
 詳細は [firmware/README.md](firmware/README.md) を参照してください。
 
 ---
@@ -262,7 +263,7 @@ pio run -t upload
 - 初回位置の地図クリック入力
 - LED 即時 / 予約 / キャンセル / RESET / RESET_AND_SET
 - デモシミュレーション（2 Gateway 相当の重複報告を含む）
-- ゾーン作成・バルーン移動・空グループ削除の API / UI
+- グループの作成・バルーン移動・空グループ削除（`FleetService` / `DataStore`。HTTP API / UI は未公開）
 - 予約一覧と LED_CANCEL 連携のキャンセル
 - 個体別 Provisioning UUID（Bluetooth MAC 由来）
 - 基準局が使えない場合の Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT）
@@ -321,7 +322,7 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 | GPS UART | UART1, RX=7, TX=6, 9600bps |
 | 基準局 SoftAP | `BM-ANCHOR-<id>`, WPA2, channel 6, FTM responder |
 | バルーン Wi-Fi | 各基準局 SoftAP へ順に接続し、UDP で座標・時刻を取得 |
-| Gateway | Wi-Fi STA → HTTP でサーバへ |
+| Gateway | Wi-Fi STA → WebSocket（既定）/ HTTP ポーリングでサーバへ |
 
 ※ ESP32-C3 は Wi-Fi と BLE の共存を行うため、実機での電力・アンテナ・FTM 精度試験は別途必要です。
 
@@ -341,8 +342,8 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 
 ## 既知の制約・注意
 
-1. **Arduino framework の BLE Mesh Node**  
-   Arduino-ESP32 のプリビルド `libbt.a` は `CONFIG_BLE_MESH_NODE` を無効にした sdkconfig でビルドされています。本実装はヘッダの構造体を有効化するため `-DCONFIG_BLE_MESH_NODE=1` を付けていますが、実機での Provisioning はコアのプリビルド構成に依存します。BLE Mesh Node を確実に使う場合は、`CONFIG_BLE_MESH_NODE=y` でビルドした Arduino-ESP32 / ESP-IDF ライブラリが必要です。Arduino を維持しつつ確実に動作させるための最重要確認事項です。
+1. **BLE Mesh Node のビルド構成**
+   `balloon` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込み、`sdkconfig.defaults` の `CONFIG_BLE_MESH_NODE=y` で Bluetooth スタックを再ビルドします。そのため `balloon` では `-DCONFIG_BLE_MESH_NODE=1` を指定しません。`gateway` は Arduino 単体構成のまま `-DCONFIG_BLE_MESH_NODE=1` を付けており、実機での Provisioning / Node 動作はプリビルド `libbt.a` の構成に依存します。Gateway の ESP-IDF 統合と実機検証は今後の課題です。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
 2. **Gateway の Protocol C**  
    サーバは WebSocket と HTTP ポーリングの両方を実装しています。Arduino Gateway は既定で WebSocket（`BM_GATEWAY_USE_WEBSOCKET=1`）を使用し、`BM_SERVER_URL` が `https://` の場合は WSS になります。HTTP ポーリングへ戻す場合は `platformio.ini` のフラグを 0 にしてください。CA を `BM_TLS_CA_CERT` で指定しない場合は証明書ピン留めなしになるため、本番では必ず CA を設定してください。
 3. **FTM timestamp** と **NEIGHBOR_REPORT の 2 件/パケット** は仕様未確定のため暫定値です。実装凍結前に [docs/decisions.md](docs/decisions.md) の項目を確定してください。
