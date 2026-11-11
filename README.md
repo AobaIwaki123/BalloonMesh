@@ -1,6 +1,6 @@
 # BalloonMesh
 
-ESP32-C3 の RGB バルーン群を、**PlatformIO (Arduino framework)**、**ASP.NET Core (.NET 10)**、**actbit/SvelteSharp の Client モード**、**PostgreSQL** で動かすプロトタイプ実装です。
+ESP32-C3 の RGB バルーン群を、**PlatformIO (Arduino + ESP-IDF)**、**ASP.NET Core (.NET 10)**、**actbit/SvelteSharp の Client モード**、**PostgreSQL** で動かすプロトタイプ実装です。
 
 引継ぎ仕様のうち、確定事項（40bit LED tick、512 件キュー、RESET cutoff、共通測位サイクル、FTM の 10 秒/30 秒集約、複数 Gateway の透明転送など）を実装し、未確定事項は [docs/decisions.md](docs/decisions.md) に「今回採用した暫定値」として分離しています。
 
@@ -266,6 +266,7 @@ pio run -t upload
 - グループの作成・バルーン移動・空グループ削除（`FleetService` / `DataStore`。HTTP API / UI は未公開）
 - 予約一覧と LED_CANCEL 連携のキャンセル
 - 個体別 Provisioning UUID（Bluetooth MAC 由来）
+- BLE Mesh 設定の NVS 永続化（アドレス・鍵・model bind・group subscription・SEQ/RPL）
 - 基準局が使えない場合の Mesh 時刻フォールバック（TIME_REQUEST/TIME_REPORT）
 - Gateway の NVS オフラインスプール（128 件、再接続後に再送）
 - Gateway 共有トークン認証（`Gateway:Token` / `X-Gateway-Token`）
@@ -343,7 +344,7 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 ## 既知の制約・注意
 
 1. **BLE Mesh Node のビルド構成**
-   `balloon` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込み、`sdkconfig.defaults` の `CONFIG_BLE_MESH_NODE=y` で Bluetooth スタックを再ビルドします。そのため `balloon` では `-DCONFIG_BLE_MESH_NODE=1` を指定しません。`gateway` は Arduino 単体構成のまま `-DCONFIG_BLE_MESH_NODE=1` を付けており、実機での Provisioning / Node 動作はプリビルド `libbt.a` の構成に依存します。Gateway の ESP-IDF 統合と実機検証は今後の課題です。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
+   `balloon` と `gateway` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込みます。`sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y` と `CONFIG_BLE_MESH_SETTINGS=y` を有効にして Bluetooth スタックをソースからビルドするため、Arduino 同梱のプリビルド `libbt.a` は使いません。`-DCONFIG_BLE_MESH_NODE=1` も不要です。Provisioning 情報（ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、SEQ/RPL）は NVS に保存され、再起動後も復元されます。初回ビルドは ESP-IDF 全体を作るため時間がかかりますが、2 回目以降は差分ビルドになります。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
 2. **Gateway の Protocol C**  
    サーバは WebSocket と HTTP ポーリングの両方を実装しています。Arduino Gateway は既定で WebSocket（`BM_GATEWAY_USE_WEBSOCKET=1`）を使用し、`BM_SERVER_URL` が `https://` の場合は WSS になります。HTTP ポーリングへ戻す場合は `platformio.ini` のフラグを 0 にしてください。CA を `BM_TLS_CA_CERT` で指定しない場合は証明書ピン留めなしになるため、本番では必ず CA を設定してください。
 3. **FTM timestamp** と **NEIGHBOR_REPORT の 2 件/パケット** は仕様未確定のため暫定値です。実装凍結前に [docs/decisions.md](docs/decisions.md) の項目を確定してください。

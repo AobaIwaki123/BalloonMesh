@@ -134,10 +134,12 @@ payload は hex。ACK は実装していません。Gateway は重複排除・�
 
 ## 12. BLE Mesh Node のビルド構成
 
-**重要:** PlatformIO の `framework = arduino`（espressif32 6.9.0 / Arduino-ESP32 2.0.17）が同梱する `libbt.a` は、`CONFIG_BLE_MESH_NODE` を無効にした sdkconfig でビルドされています。役割ごとに次の構成を採用しています。
+**重要:** PlatformIO の `framework = arduino`（espressif32 6.9.0 / Arduino-ESP32 2.0.17）が同梱する `libbt.a` は、`CONFIG_BLE_MESH_NODE` を無効にした sdkconfig でビルドされています。本実装では `balloon` と `gateway` の両方を次の構成に統一しています。
 
-- `balloon`: `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込む。`balloon/sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y` ほかを有効化して Bluetooth スタックを再ビルドし、`src/CMakeLists.txt` でアプリのソースを ESP-IDF に登録する。`-DCONFIG_BLE_MESH_NODE=1` は使わない。
-- `gateway`: Arduino 単体構成のまま `-DCONFIG_BLE_MESH_NODE=1` を定義し、ヘッダの Node 構造体だけを有効化する。実機での Provisioning / Node 動作はプリビルド `libbt.a` の構成に依存し、ESP-IDF 統合と実機検証は未実施。
+- `balloon` / `gateway`: `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込む。各プロジェクトの `sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y`、`CONFIG_BLE_MESH_SETTINGS=y` ほかを有効化して Bluetooth スタックをソースからビルドし、`src/CMakeLists.txt` でアプリのソースを ESP-IDF に登録する。Arduino 同梱のプリビルド `libbt.a` と `-DCONFIG_BLE_MESH_NODE=1` は使わない。
+- `CONFIG_BLE_MESH_SETTINGS=y` により、ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、シーケンス番号、Replay Protection List が NVS に保存され、再起動後も Provisioning 状態が復元される。
+- Gateway は Wi-Fi STA と BLE Mesh Node を同時に動かすため、実機で Wi-Fi/BLE 共存と再起動後の購読復元を確認する。
+- `CONFIG_BLE_MESH_MODEL_GROUP_COUNT` は既定値 3 のままでよい。現行コードはモデルごとに `0xC010` または `0xC011` の 1 グループだけを購読する。ゾーン購読を再導入する場合は増やす。
 
 Arduino を維持する場合の推奨確認手順:
 
@@ -148,6 +150,7 @@ Arduino を維持する場合の推奨確認手順:
 ## 13. 実装済みの追加項目
 
 - バルーン LED キューの NVS スナップショット保存・復元（2 秒 debounce）
+- BLE Mesh 設定（アドレス・鍵・model bind・group subscription・SEQ/RPL）の NVS 永続化（`CONFIG_BLE_MESH_SETTINGS=y`、balloon / gateway）
 - サーバのグループ作成・バルーン移動・空グループ削除（`FleetService` / `DataStore`。HTTP API / UI は未公開）
 - 予約コマンド一覧と LED_CANCEL 連携キャンセル
 - Gateway の WebSocket（WSS 対応）/ HTTPS HTTP ポーリング二系統
