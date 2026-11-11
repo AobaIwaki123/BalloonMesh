@@ -98,6 +98,9 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private BalloonRowViewModel? _selectedBalloon;
 
+    [ObservableProperty]
+    private int _selectedTabIndex;
+
     [RelayCommand]
     private Task ConnectAsync() => RunAsync("Connect", async () =>
     {

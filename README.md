@@ -115,7 +115,7 @@ pio test -e native
 dotnet test tools/BalloonMesh.DebugTool.Tests/BalloonMesh.DebugTool.Tests.csproj
 ```
 
-（40 tests、PostgreSQL 不要）
+（45 tests、PostgreSQL 不要）
 
 ### 4. デバッグツール (Avalonia UI)
 
@@ -129,6 +129,7 @@ dotnet run --project tools/BalloonMesh.DebugTool/BalloonMesh.DebugTool.csproj
 - **Commands**: LED 即時 / 予約 / キャンセル / RESET / RESET_AND_SET
 - **Gateway simulator**: WebSocket / HTTP ポーリングの擬似 Gateway。下りコマンドの Protocol B デコードと、FTM / QUEUE_STATUS / NEIGHBOR_REPORT の注入
 - **Protocol**: 既知 Opcode の生成と、任意 opcode / payload のデコード
+- **Decoded log**: 送受信と手動デコードを TX / RX / DECODE として記録。全フィールド、raw JSON、方向 / transport / 検索フィルタ、ログ保存
 - **認証**: Development の Mock ログイン、または Session Cookie を貼り付け
 - **設定**: 秘密情報を除く入力値を ApplicationData 配下に保存
 

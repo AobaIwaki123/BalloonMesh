@@ -65,6 +65,64 @@ public sealed class GatewayEmulatorTests
     }
 
     [Fact]
+    public async Task HttpEmulator_RaisesSentEventForUplink()
+    {
+        var handler = new GatewayHandler();
+        using var client = new DebugApiClient(new Uri("http://localhost:5080"), handler);
+        await using var emulator = new GatewayEmulator(CreateOptions(), client);
+        var sent = new TaskCompletionSource<SentGatewayEvent>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        emulator.EventSent += message => sent.TrySetResult(message);
+
+        await emulator.StartAsync();
+        await emulator.SendEventAsync(new GatewayEventInfo(
+            0x0101, 0xC011, 0xC702E5, "0102030405060708", -50, 7));
+
+        var message = await sent.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(GatewayTransport.Http, message.Transport);
+        Assert.Contains("FTM_REPORT", ProtocolInspector.FormatDecoded(message.Decoded));
+        Assert.Contains("\"type\":\"mesh\"", message.RawJson);
+        await emulator.StopAsync();
+    }
+
+    [Fact]
+    public async Task HttpEmulator_DecodedDownlinkHasSyntheticRawJson()
+    {
+        const string commandJson = """
+            {"commands":[{"dst":49169,"opcode":13042405,
+              "payload":"0102030405060708","ttl":7}]}
+            """;
+        var handler = new GatewayHandler();
+        var firstPoll = true;
+        handler.Commands = _ =>
+        {
+            if (!firstPoll)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            firstPoll = false;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(commandJson, Encoding.UTF8, "application/json")
+            };
+        };
+        using var client = new DebugApiClient(new Uri("http://localhost:5080"), handler);
+        await using var emulator = new GatewayEmulator(CreateOptions(), client);
+        var received = new TaskCompletionSource<ReceivedGatewayCommand>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        emulator.CommandReceived += message => received.TrySetResult(message);
+
+        await emulator.StartAsync();
+        var message = await received.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
+        Assert.Equal(GatewayTransport.Http, message.Transport);
+        Assert.Equal("FTM_REPORT", message.Decoded.Name);
+        Assert.Contains("0102030405060708", message.RawJson);
+        Assert.Contains("\"type\":\"mesh\"", message.RawJson);
+        await emulator.StopAsync();
+    }
+
+    [Fact]
     public void HttpEmulator_RejectsBusyLoopPollWait()
     {
         Assert.Throws<ArgumentException>(() => new GatewayEmulatorOptions(

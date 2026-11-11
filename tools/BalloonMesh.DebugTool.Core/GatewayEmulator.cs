@@ -10,7 +10,15 @@ public sealed record ReceivedGatewayCommand(
     DateTimeOffset ReceivedAt,
     GatewayCommandInfo Command,
     DecodedMessage Decoded,
-    string RawJson);
+    string RawJson,
+    GatewayTransport Transport);
+
+public sealed record SentGatewayEvent(
+    DateTimeOffset SentAt,
+    GatewayEventInfo Message,
+    DecodedMessage Decoded,
+    string RawJson,
+    GatewayTransport Transport);
 
 /// <summary>
 /// A gateway stand-in for debugging without hardware.  WebSocket mode speaks
@@ -64,6 +72,8 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
     public event Action<GatewayConnectionState>? ConnectionChanged;
 
     public event Action<ReceivedGatewayCommand>? CommandReceived;
+
+    public event Action<SentGatewayEvent>? EventSent;
 
     public GatewayEmulatorOptions Options => _options;
 
@@ -280,9 +290,16 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
 
         // Validate and normalise payload hex before any transport is touched.
-        var normalized = messages.Select(message => message with
+        var prepared = messages.Select(message =>
         {
-            Payload = ProtocolInspector.NormalizePayloadHex(message.Payload)
+            var normalized = message with
+            {
+                Payload = ProtocolInspector.NormalizePayloadHex(message.Payload)
+            };
+            return (
+                Message: normalized,
+                RawJson: GatewayProtocolCodec.CreateUplink(normalized),
+                Decoded: ProtocolInspector.Decode(normalized.Opcode, normalized.Payload));
         }).ToArray();
 
         CancellationToken runToken;
@@ -306,20 +323,25 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
 
         if (_options.Transport == GatewayTransport.WebSocket)
         {
-            foreach (var message in normalized)
+            foreach (var item in prepared)
             {
-                await SendOnSocketAsync(socket!, GatewayProtocolCodec.CreateUplink(message),
-                    token).ConfigureAwait(false);
+                await SendOnSocketAsync(socket!, item.RawJson, token).ConfigureAwait(false);
+                RaiseSentEvent(item.Message, item.Decoded, item.RawJson);
             }
         }
         else
         {
-            await _api.SendGatewayEventsAsync(_options.GatewayId, normalized,
+            await _api.SendGatewayEventsAsync(_options.GatewayId,
+                prepared.Select(item => item.Message).ToArray(),
                 _options.Firmware, _options.Provisioned, _options.SpoolPending,
                 token).ConfigureAwait(false);
+            foreach (var item in prepared)
+            {
+                RaiseSentEvent(item.Message, item.Decoded, item.RawJson);
+            }
         }
 
-        RaiseLog($"Sent {normalized.Length} uplink message(s) via {TransportName(_options.Transport)}.");
+
     }
 
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -503,10 +525,17 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
             decoded = new DecodedMessage(command.Opcode, false, null, "DECODE_ERROR",
                 $"Could not decode the payload: {exception.Message}", [], [exception.Message]);
         }
+        var json = rawJson ?? GatewayProtocolCodec.CreateCommandJson(command);
         var received = new ReceivedGatewayCommand(DateTimeOffset.UtcNow, command, decoded,
-            rawJson ?? string.Empty);
+            json, _options.Transport);
         SafeInvoke(CommandReceived, received);
-        RaiseLog($"Downlink {command.Dst:X4} {decoded.Name} {decoded.Summary}");
+    }
+
+    private void RaiseSentEvent(GatewayEventInfo message, DecodedMessage decoded, string rawJson)
+    {
+        var sent = new SentGatewayEvent(DateTimeOffset.UtcNow, message, decoded, rawJson,
+            _options.Transport);
+        SafeInvoke(EventSent, sent);
     }
 
     private void MarkLoopStopped(long generation, string reason)

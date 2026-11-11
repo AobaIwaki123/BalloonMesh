@@ -16,10 +16,16 @@ BalloonMesh サーバと BLE Mesh Gateway の動作を、実機なしで確認�
   送信結果の opcode / payload / 受信 Gateway 数を表示します。
 - **Gateway simulator**: WebSocket または HTTP ポーリングで擬似 Gateway を
   起動し、サーバからの下りコマンドを Protocol B としてデコード表示します。
+  受信一覧の **Open** で payload を Protocol タブへ送れます。
   FTM_REPORT、QUEUE_STATUS、NEIGHBOR_REPORT を手動またはバッチで注入できます。
+  HTTP ポーリングの TX/RX raw JSON は、実際の HTTP バッチではなく
+  メッシュメッセージ単位に合成した `type=mesh` フレームです。
 - **Protocol**: 既知の Vendor Opcode をプリセットから生成し、任意の
   opcode / payload をデコードします。長さ不一致や非 Vendor Opcode は警告として
   表示し、デバッグを止めません。
+- **Decoded log**: 送信 (TX)、受信 (RX)、手動デコード (DECODE) を時系列で
+  記録します。opcode / opcode 名 / 全フィールド / raw JSON を表示し、
+  direction・transport・検索で絞り込めます。表示中のログはファイルへ保存できます。
 - **Log**: 最大 500 行の操作ログ。設定は秘密情報を除いて保存されます。
 
 ## 前提

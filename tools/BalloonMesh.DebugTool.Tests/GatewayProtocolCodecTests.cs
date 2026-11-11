@@ -40,6 +40,18 @@ public sealed class GatewayProtocolCodecTests
     }
 
     [Fact]
+    public void CreateCommandJson_RoundTripsThroughDownlinkParser()
+    {
+        var command = new GatewayCommandInfo(0xC011, 0xC102E5, "0102030405060708", 7);
+
+        var json = GatewayProtocolCodec.CreateCommandJson(command);
+
+        Assert.True(GatewayProtocolCodec.TryParseDownlink(json, out var parsed, out var error),
+            error);
+        Assert.Equal(command, parsed);
+    }
+
+    [Fact]
     public void CreateUplink_NormalizesHexPayload()
     {
         var message = new GatewayEventInfo(0x0101, 0xC011, 0xC702E5, "0x01 02:03", -45, 7);

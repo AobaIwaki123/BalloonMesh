@@ -242,6 +242,37 @@ public static class ProtocolInspector
 
     public static uint ToVendorOpcode(byte op) => BalloonProtocol.VendorOpcode(op);
 
+    public static string TransportDisplayName(GatewayTransport? transport) => transport switch
+    {
+        GatewayTransport.WebSocket => "WebSocket",
+        GatewayTransport.Http => "HTTP",
+        _ => "-"
+    };
+
+    public static string RawJsonLabel(GatewayTransport? transport) => transport switch
+    {
+        GatewayTransport.WebSocket => "Raw WebSocket frame",
+        GatewayTransport.Http => "Synthesized mesh frame (HTTP transport)",
+        _ => "Decoded input"
+    };
+
+    /// <summary>
+    /// One-line decoded form for the decoded-log view: all payload fields are
+    /// expanded, while the common opcode/payload framing fields are omitted.
+    /// </summary>
+    public static string FormatDecoded(DecodedMessage message)
+    {
+        if (!message.IsVendor)
+        {
+            return $"{message.Name} {message.Summary}";
+        }
+        var details = message.Fields
+            .Where(field => field.Name is not ("Op" or "Opcode" or "Payload length" or "Payload"))
+            .Select(field => $"{field.Name}={field.Value}")
+            .ToArray();
+        return details.Length == 0 ? message.Name : $"{message.Name} {string.Join(", ", details)}";
+    }
+
     public static byte[] ParseHex(string? text)
     {
         if (string.IsNullOrWhiteSpace(text))

@@ -48,6 +48,20 @@ public static class GatewayProtocolCodec
         }, Json);
     }
 
+    /// <summary>
+    /// Serializes the command object returned by the HTTP long-poll endpoint.
+    /// The WebSocket transport keeps the exact received frame instead.
+    /// </summary>
+    public static string CreateCommandJson(GatewayCommandInfo command) =>
+        JsonSerializer.Serialize(new
+        {
+            type = "mesh",
+            dst = command.Dst,
+            opcode = command.Opcode,
+            payload = command.Payload,
+            ttl = command.Ttl
+        }, Json);
+
     public static bool TryParseDownlink(string json, out GatewayCommandInfo command,
         out string? error)
     {

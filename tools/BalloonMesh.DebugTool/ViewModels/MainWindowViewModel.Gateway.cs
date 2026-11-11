@@ -113,6 +113,7 @@ public partial class MainWindowViewModel
         emulator.Log += OnEmulatorLog;
         emulator.ConnectionChanged += OnEmulatorConnectionChanged;
         emulator.CommandReceived += OnEmulatorCommandReceived;
+        emulator.EventSent += OnEmulatorEventSent;
         try
         {
             await emulator.StartAsync().ConfigureAwait(true);
@@ -155,7 +156,6 @@ public partial class MainWindowViewModel
         var message = BuildFtmMessage(ParseUShortValue(FtmDistanceCm, "Distance cm"),
             ParseByteValue(FtmBatchId, "Batch id"), ParseByteValue(FtmAnchor, "Anchor id"));
         await emulator.SendEventAsync(message).ConfigureAwait(true);
-        AddLog("send", $"FTM report source=0x{message.Src:X4} payload={message.Payload}.");
     });
 
     [RelayCommand]
@@ -171,7 +171,6 @@ public partial class MainWindowViewModel
             messages.Add(BuildFtmMessage(distance, batch, anchor));
         }
         await emulator.SendEventsAsync(messages).ConfigureAwait(true);
-        AddLog("send", $"FTM batch sent for source=0x{messages[0].Src:X4} batch={batch}.");
     });
 
     [RelayCommand]
@@ -188,7 +187,6 @@ public partial class MainWindowViewModel
         var encoded = ProtocolInspector.EncodeQueueStatus(kind, count);
         var message = BuildMessage(encoded);
         await emulator.SendEventAsync(message).ConfigureAwait(true);
-        AddLog("send", $"QUEUE_STATUS kind={QueueKind} count={count} via 0x{message.Src:X4}.");
     });
 
     [RelayCommand]
@@ -201,7 +199,6 @@ public partial class MainWindowViewModel
             BuildNeighborSamples());
         var message = BuildMessage(encoded);
         await emulator.SendEventAsync(message).ConfigureAwait(true);
-        AddLog("send", $"NEIGHBOR_REPORT batch={batch} index={index}.");
     });
 
     private GatewayEmulator RequireEmulator() =>
@@ -257,12 +254,24 @@ public partial class MainWindowViewModel
     private void OnEmulatorCommandReceived(ReceivedGatewayCommand received) =>
         Dispatcher.UIThread.Post(() =>
         {
-            ReceivedCommands.Add(new ReceivedCommandRowViewModel(received));
+            ReceivedCommands.Add(new ReceivedCommandRowViewModel(received, OpenInProtocol));
             while (ReceivedCommands.Count > MaxReceivedCommands)
             {
                 ReceivedCommands.RemoveAt(0);
             }
-            AddLog("recv", $"{received.Decoded.Name} {received.Decoded.Summary}");
+            AddLog("recv",
+                $"RX {received.Command.Dst:X4} {ProtocolInspector.FormatDecoded(received.Decoded)}");
+            AddDecodedEntry(received.ReceivedAt, "RX", received.Transport,
+                received.Decoded, received.RawJson);
+        });
+
+    private void OnEmulatorEventSent(SentGatewayEvent sent) =>
+        Dispatcher.UIThread.Post(() =>
+        {
+            AddLog("send",
+                $"TX {sent.Message.Src:X4}->{sent.Message.Dst:X4} " +
+                ProtocolInspector.FormatDecoded(sent.Decoded));
+            AddDecodedEntry(sent.SentAt, "TX", sent.Transport, sent.Decoded, sent.RawJson);
         });
 
     private void DetachEmulator(GatewayEmulator emulator)
@@ -270,5 +279,6 @@ public partial class MainWindowViewModel
         emulator.Log -= OnEmulatorLog;
         emulator.ConnectionChanged -= OnEmulatorConnectionChanged;
         emulator.CommandReceived -= OnEmulatorCommandReceived;
+        emulator.EventSent -= OnEmulatorEventSent;
     }
 }

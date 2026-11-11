@@ -46,7 +46,7 @@
             </StackPanel>
         </Border>
 
-        <TabControl Grid.Row="1" Margin="8">
+        <TabControl Grid.Row="1" Margin="8" SelectedIndex="{Binding SelectedTabIndex}">
             <TabItem Header="Fleet">
                 <views:FleetView />
             </TabItem>
@@ -58,6 +58,9 @@
             </TabItem>
             <TabItem Header="Protocol">
                 <views:ProtocolView />
+            </TabItem>
+            <TabItem Header="Decoded log">
+                <views:DecodedLogView />
             </TabItem>
         </TabControl>
 

@@ -134,4 +134,32 @@ public sealed class ProtocolInspectorTests
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             ProtocolInspector.EncodeRaw(0x40, string.Empty));
     }
+
+    [Fact]
+    public void TransportAndRawLabels_AreNormalizedForTheDecodedLog()
+    {
+        Assert.Equal("WebSocket",
+            ProtocolInspector.TransportDisplayName(GatewayTransport.WebSocket));
+        Assert.Equal("HTTP", ProtocolInspector.TransportDisplayName(GatewayTransport.Http));
+        Assert.Equal("-", ProtocolInspector.TransportDisplayName(null));
+        Assert.Contains("HTTP",
+            ProtocolInspector.RawJsonLabel(GatewayTransport.Http));
+        Assert.Contains("WebSocket",
+            ProtocolInspector.RawJsonLabel(GatewayTransport.WebSocket));
+        Assert.Equal("Decoded input", ProtocolInspector.RawJsonLabel(null));
+    }
+
+    [Fact]
+    public void FormatDecoded_ExpandsPayloadFieldsWithoutFraming()
+    {
+        var encoded = ProtocolInspector.EncodeLedSet(DateTimeOffset.UtcNow, 1, 2, 3);
+        var decoded = ProtocolInspector.Decode(encoded.Opcode, encoded.PayloadHex);
+
+        var text = ProtocolInspector.FormatDecoded(decoded);
+
+        Assert.Contains("LED_SET", text);
+        Assert.Contains("RGB=#010203 (1, 2, 3)", text);
+        Assert.DoesNotContain("Payload=", text);
+        Assert.DoesNotContain("Opcode=", text);
+    }
 }

@@ -70,7 +70,8 @@ public sealed class ShowStepRowViewModel
 
 public sealed class ReceivedCommandRowViewModel
 {
-    public ReceivedCommandRowViewModel(ReceivedGatewayCommand received)
+    public ReceivedCommandRowViewModel(ReceivedGatewayCommand received,
+        Action<GatewayCommandInfo> openInProtocol)
     {
         TimeText = received.ReceivedAt.ToLocalTime()
             .ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
@@ -79,6 +80,7 @@ public sealed class ReceivedCommandRowViewModel
         Summary = received.Decoded.Summary;
         Payload = received.Command.Payload;
         RawJson = received.RawJson;
+        OpenInProtocolCommand = new RelayCommand(() => openInProtocol(received.Command));
     }
 
     public string TimeText { get; }
@@ -87,6 +89,35 @@ public sealed class ReceivedCommandRowViewModel
     public string Summary { get; }
     public string Payload { get; }
     public string RawJson { get; }
+    public IRelayCommand OpenInProtocolCommand { get; }
+}
+
+public sealed class DecodedLogEntryViewModel
+{
+    public DecodedLogEntryViewModel(DateTimeOffset timestamp, string direction,
+        GatewayTransport? transport, DecodedMessage decoded, string rawJson)
+    {
+        TimeText = timestamp.ToLocalTime()
+            .ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+        Direction = direction;
+        Transport = ProtocolInspector.TransportDisplayName(transport);
+        RawJsonLabel = ProtocolInspector.RawJsonLabel(transport);
+        Name = decoded.Name;
+        OpcodeText = $"0x{decoded.Opcode:X6}";
+        Fields = ProtocolInspector.FormatDecoded(decoded);
+        RawJson = rawJson;
+    }
+
+    public string TimeText { get; }
+    public string Direction { get; }
+    public string Transport { get; }
+    public string RawJsonLabel { get; }
+    public string Name { get; }
+    public string OpcodeText { get; }
+    public string Fields { get; }
+    public string RawJson { get; }
+    public string Text => $"{TimeText} [{Direction}/{Transport}] {OpcodeText} {Fields}";
+    public string SearchText => $"{Direction} {Transport} {OpcodeText} {Name} {Fields} {RawJson}";
 }
 
 public sealed class LogLineViewModel

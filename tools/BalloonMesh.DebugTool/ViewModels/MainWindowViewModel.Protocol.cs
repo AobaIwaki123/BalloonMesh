@@ -107,7 +107,8 @@ public partial class MainWindowViewModel
             {
                 ProtocolFields.Add(new ProtocolFieldRow(field.Name, field.Value));
             }
-            AddLog("info", $"Decoded {decoded.Name}: {decoded.Summary}");
+            AddDecodedEntry(DateTimeOffset.Now, "DECODE", null, decoded, string.Empty);
+            AddLog("info", $"Decoded {ProtocolInspector.FormatDecoded(decoded)}");
             if (decoded.HasWarnings)
             {
                 AddLog("warn", string.Join("; ", decoded.Warnings));
@@ -120,6 +121,15 @@ public partial class MainWindowViewModel
             ProtocolFields.Clear();
             AddLog("error", $"Protocol decode failed: {exception.Message}");
         }
+    }
+
+    public void OpenInProtocol(GatewayCommandInfo command)
+    {
+        ProtocolOpcode = $"0x{command.Opcode:X6}";
+        ProtocolPayload = command.Payload;
+        ExpandShortOpcode = false;
+        DecodeProtocolMessage();
+        SelectedTabIndex = 3;
     }
 
     private void ApplyEncoded(EncodedMessage encoded)
