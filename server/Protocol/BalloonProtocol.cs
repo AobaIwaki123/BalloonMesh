@@ -24,13 +24,15 @@ public static class BalloonProtocol
     public const byte OpTimeRequest = 0x0B;
     public const byte OpTimeReport = 0x0C;
 
-    public const ushort GroupFtmReport = 0xC001;
-    public const ushort GroupNeighborReport = 0xC002;
-    public const ushort GroupQueueStatus = 0xC003;
-    public const ushort GroupNeighborProbe = 0xC004;
-    public const ushort GroupTime = 0xC005;
+    // Balloon-facing broadcast group (LED, time sync, neighbour probing).
     public const ushort GroupLedAll = 0xC010;
-    public const ushort GroupLedZoneBase = 0xC100;
+    public const ushort GroupNeighborProbe = 0xC010;
+    public const ushort GroupTime = 0xC010;
+
+    // Gateway-facing broadcast group (telemetry consumed by gateways).
+    public const ushort GroupFtmReport = 0xC011;
+    public const ushort GroupNeighborReport = 0xC011;
+    public const ushort GroupQueueStatus = 0xC011;
 
     public const byte OpQueueStatusNearFull = 0x01;
     public const byte OpQueueStatusRecovered = 0x02;

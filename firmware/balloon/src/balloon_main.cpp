@@ -47,6 +47,9 @@ void loop() {
     uint32_t now = millis();
     if ((uint32_t)(now - last) >= 30000u) {
         last = now;
+        if (!bm_clock_is_synced()) {
+            bm_time_link_request();
+        }
         bm_led_controller_state_t state = {};
         bm_led_controller_get_state(&state);
         ESP_LOGI(TAG, "addr=0x%04x provisioned=%d synced=%d queue=%u rgb=%u,%u,%u",

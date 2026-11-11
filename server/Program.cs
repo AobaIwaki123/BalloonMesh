@@ -178,41 +178,6 @@ app.MapPost("/api/balloons/{address}/initial-position",
         }
     }).RequireAuthorization(AuthRoles.Operator);
 
-app.MapPost("/api/groups", (CreateGroupRequest request, FleetService fleet) =>
-{
-    try
-    {
-        return Results.Ok(fleet.CreateGroup(request.Name));
-    }
-    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-    {
-        return Results.BadRequest(new { error = exception.Message });
-    }
-}).RequireAuthorization(AuthRoles.Admin);
-
-app.MapDelete("/api/groups/{id:int}", (int id, FleetService fleet) =>
-    fleet.DeleteGroup(id)
-        ? Results.NoContent()
-        : Results.BadRequest(new { error = "Group is not empty, is the all-balloons group, or does not exist." }))
-    .RequireAuthorization(AuthRoles.Admin);
-
-app.MapPost("/api/balloons/{address}/group",
-    (string address, AssignGroupRequest request, FleetService fleet) =>
-    {
-        if (!TryParseAddress(address, out var meshAddress))
-        {
-            return Results.BadRequest(new { error = "Invalid balloon address." });
-        }
-        try
-        {
-            return Results.Ok(fleet.AssignBalloonToGroup(meshAddress, request.GroupId));
-        }
-        catch (ArgumentException exception)
-        {
-            return Results.BadRequest(new { error = exception.Message });
-        }
-    }).RequireAuthorization(AuthRoles.Admin);
-
 app.MapGet("/api/anchors", (FleetService fleet) => Results.Ok(fleet.GetAnchors()))
     .RequireAuthorization(AuthRoles.Viewer);
 

@@ -95,21 +95,20 @@ static void subscribe_control_groups(void) {
     if (addr == ESP_BLE_MESH_ADDR_UNASSIGNED) {
         return;
     }
-    uint16_t groups[4 + BM_GROUP_LED_ZONE_COUNT];
-    size_t count = 0;
-    groups[count++] = BM_GROUP_LED_ALL;
-    groups[count++] = BM_GROUP_NEIGHBOR_PROBE;
-    groups[count++] = BM_GROUP_NEIGHBOR_REPORT;
-    groups[count++] = BM_GROUP_TIME;
-    for (uint16_t i = 0; i < BM_GROUP_LED_ZONE_COUNT; ++i) {
-        groups[count++] = (uint16_t)(BM_GROUP_LED_ZONE_BASE + i);
+    /* Free slots occupied by subscriptions from older firmware. */
+    const uint16_t legacy_groups[] = { 0xC004u, 0xC002u, 0xC005u };
+    for (size_t i = 0; i < sizeof(legacy_groups) / sizeof(legacy_groups[0]); ++i) {
+        (void)esp_ble_mesh_model_unsubscribe_group_addr(
+            addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, legacy_groups[i]);
     }
-    for (size_t i = 0; i < count; ++i) {
-        esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
-            addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, groups[i]);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG, "subscribe 0x%04x failed: %s", groups[i], esp_err_to_name(err));
-        }
+    for (uint16_t group = 0xC100u; group < 0xC110u; ++group) {
+        (void)esp_ble_mesh_model_unsubscribe_group_addr(
+            addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, group);
+    }
+    esp_err_t err = esp_ble_mesh_model_subscribe_group_addr(
+        addr, BM_COMPANY_ID_LOCAL, BM_MODEL_ID_CONTROL, BM_GROUP_BALLOON);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "subscribe 0x%04x failed: %s", BM_GROUP_BALLOON, esp_err_to_name(err));
     }
     ESP_LOGI(TAG, "provisioned with primary address 0x%04x", addr);
 }
@@ -130,6 +129,11 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event,
             s_provisioned = false;
             s_primary_addr = ESP_BLE_MESH_ADDR_UNASSIGNED;
             ESP_LOGW(TAG, "node reset");
+            esp_err_t err = esp_ble_mesh_node_prov_enable(
+                (esp_ble_mesh_prov_bearer_t)(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "restart provisioning failed: %s", esp_err_to_name(err));
+            }
             break;
         default:
             break;

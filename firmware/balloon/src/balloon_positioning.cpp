@@ -192,11 +192,6 @@ static void positioning_task(void *argument) {
             measure_anchor(&BM_ANCHORS[i], batch_id, &valid_count);
         }
 
-        if (!bm_clock_is_synced()) {
-            bm_time_link_request();
-            vTaskDelay(pdMS_TO_TICKS(3000));
-        }
-
         if (valid_count <= 2) {
             uint32_t start = millis();
             bm_neighbor_link_begin_collection(start);

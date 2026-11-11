@@ -81,6 +81,27 @@ public sealed class LedDispatchTests
     }
 
     [Fact]
+    public void ZoneCommandsAreRejectedRatherThanBroadcast()
+    {
+        using var database = new TemporaryDatabase();
+        var fleet = new FleetService(database.Store);
+        Assert.Throws<ArgumentException>(() => fleet.ResolveTarget("group", "1"));
+        Assert.Equal(BalloonProtocol.GroupLedAll, fleet.ResolveTarget("all", "all").Destination);
+        Assert.Equal((ushort)0x0101, fleet.ResolveTarget("balloon", "0x0101").Destination);
+    }
+
+    [Fact]
+    public void BroadcastGroupsAreSplitByReceiverRole()
+    {
+        Assert.Equal((ushort)0xC010, BalloonProtocol.GroupLedAll);
+        Assert.Equal((ushort)0xC010, BalloonProtocol.GroupTime);
+        Assert.Equal((ushort)0xC010, BalloonProtocol.GroupNeighborProbe);
+        Assert.Equal((ushort)0xC011, BalloonProtocol.GroupFtmReport);
+        Assert.Equal((ushort)0xC011, BalloonProtocol.GroupNeighborReport);
+        Assert.Equal((ushort)0xC011, BalloonProtocol.GroupQueueStatus);
+    }
+
+    [Fact]
     public void GroupsCanBeCreatedAssignedAndDeletedWhenEmpty()
     {
         using var database = new TemporaryDatabase();
