@@ -20,12 +20,17 @@ firmware/
 
 server/                         ASP.NET Core
   Auth/                         Cookie + OIDC / Discord + role policies
-  Protocol/                     Protocol B codec
+  BalloonMesh.Protocol/         Protocol B codec (server + debug tool で共有)
   Data/                         PostgreSQL (Npgsql)
   Services/                     FTM 集約 / 測位 / LED 配信 / Gateway / シミュレーション
   Hubs/                         SignalR
   Views/Home.svelte             SvelteSharp Client モードの UI
   Views/Login.svelte            ログイン画面
+
+tools/
+  BalloonMesh.DebugTool/        Avalonia UI デスクトップデバッグツール
+  BalloonMesh.DebugTool.Core/   API クライアント / Gateway エミュレータ / Protocol inspector
+  BalloonMesh.DebugTool.Tests/  xUnit テスト (サーバ不要)
 
 third_party/SvelteSharp/        git submodule (actbit/SvelteSharp, commit pinned)
 docs/decisions.md               未確定事項に対する今回の暫定決定
@@ -103,6 +108,31 @@ pio test -e native
 ```
 
 （14 tests）
+
+デバッグツールのテスト:
+
+```powershell
+dotnet test tools/BalloonMesh.DebugTool.Tests/BalloonMesh.DebugTool.Tests.csproj
+```
+
+（40 tests、PostgreSQL 不要）
+
+### 4. デバッグツール (Avalonia UI)
+
+サーバと Gateway を実機なしで確認するための **Avalonia UI 12 / .NET 10** 製デスクトップツールです。Windows 10/11 と macOS (Intel / Apple Silicon) で動作します。
+
+```powershell
+dotnet run --project tools/BalloonMesh.DebugTool/BalloonMesh.DebugTool.csproj
+```
+
+- **Fleet**: バルーン・Gateway・予約済み Show step の一覧、Show step のキャンセル
+- **Commands**: LED 即時 / 予約 / キャンセル / RESET / RESET_AND_SET
+- **Gateway simulator**: WebSocket / HTTP ポーリングの擬似 Gateway。下りコマンドの Protocol B デコードと、FTM / QUEUE_STATUS / NEIGHBOR_REPORT の注入
+- **Protocol**: 既知 Opcode の生成と、任意 opcode / payload のデコード
+- **認証**: Development の Mock ログイン、または Session Cookie を貼り付け
+- **設定**: 秘密情報を除く入力値を ApplicationData 配下に保存
+
+詳細と配布用ビルド手順は [tools/BalloonMesh.DebugTool/README.md](tools/BalloonMesh.DebugTool/README.md) を参照してください。
 
 ## 認証・認可
 
@@ -187,7 +217,7 @@ dotnet run --project server/BalloonMesh.Server.csproj --urls http://localhost:50
 
 実際の Provisioner 本体 / 鍵配布 / model bind / グループ購読の自動化は未実装です（ファームウェアは Provision 完了後に固定グループへ subscribe します）。
 
-### 4. ファームウェア
+### 5. ファームウェア
 
 各デバイスは独立した PlatformIO プロジェクトです。
 

@@ -1,0 +1,174 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:BalloonMesh.DebugTool.ViewModels"
+             x:Class="BalloonMesh.DebugTool.Views.GatewayView"
+             x:DataType="vm:MainWindowViewModel"
+             x:CompileBindings="True">
+
+    <ScrollViewer>
+        <StackPanel Spacing="8" Margin="4">
+            <Grid ColumnDefinitions="*,*">
+                <Border Grid.Column="0" Classes="card" Margin="0,0,8,0">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="h2" Text="Gateway emulator" />
+                        <WrapPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Gateway id" VerticalAlignment="Center" />
+                                <TextBox Width="150" Text="{Binding GatewayId}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Transport" VerticalAlignment="Center" />
+                                <ComboBox Width="120" ItemsSource="{Binding GatewayTransports}"
+                                          SelectedItem="{Binding GatewayTransportMode}" />
+                            </StackPanel>
+                        </WrapPanel>
+                        <WrapPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Firmware" VerticalAlignment="Center" />
+                                <TextBox Width="150" Text="{Binding GatewayFirmware}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Spool pending" VerticalAlignment="Center" />
+                                <TextBox Width="80" Text="{Binding SpoolPending}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Poll wait ms" VerticalAlignment="Center" />
+                                <TextBox Width="90" Text="{Binding PollWaitMs}" />
+                            </StackPanel>
+                            <CheckBox Content="Provisioned" IsChecked="{Binding Provisioned}"
+                                      Margin="0,0,12,6" />
+                        </WrapPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Start" Command="{Binding StartEmulatorCommand}" />
+                            <Button Content="Stop" Command="{Binding StopEmulatorCommand}"
+                                    IsEnabled="{Binding EmulatorRunning}" />
+                            <TextBlock Text="{Binding EmulatorStatus}" VerticalAlignment="Center"
+                                       TextWrapping="Wrap" Classes="muted" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" Classes="card">
+                    <StackPanel Spacing="6">
+                        <TextBlock Classes="h2" Text="Inject uplink" />
+                        <WrapPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Source balloon" VerticalAlignment="Center" />
+                                <TextBox Width="110" Text="{Binding InjectSource}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Destination" VerticalAlignment="Center" />
+                                <TextBox Width="110" Text="{Binding InjectDst}" />
+                            </StackPanel>
+                        </WrapPanel>
+
+                        <TextBlock Text="FTM" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        <WrapPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Anchor" VerticalAlignment="Center" />
+                                <TextBox Width="60" Text="{Binding FtmAnchor}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Distance cm" VerticalAlignment="Center" />
+                                <TextBox Width="90" Text="{Binding FtmDistanceCm}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Timestamp" VerticalAlignment="Center" />
+                                <TextBox Width="110" Text="{Binding FtmTimestamp}"
+                                         PlaceholderText="blank = now" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Batch" VerticalAlignment="Center" />
+                                <TextBox Width="60" Text="{Binding FtmBatchId}" />
+                            </StackPanel>
+                        </WrapPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button Content="Send FTM" Command="{Binding SendFtmCommand}" />
+                            <Button Content="Send FTM batch (4 anchors)"
+                                    Command="{Binding SendFtmBatchCommand}" />
+                        </StackPanel>
+
+                        <TextBlock Text="Queue" FontWeight="SemiBold" Margin="0,6,0,0" />
+                        <WrapPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Kind" VerticalAlignment="Center" />
+                                <ComboBox Width="120" ItemsSource="{Binding QueueKinds}"
+                                          SelectedItem="{Binding QueueKind}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Count" VerticalAlignment="Center" />
+                                <TextBox Width="90" Text="{Binding QueueCount}" />
+                            </StackPanel>
+                            <Button Content="Send queue status" Command="{Binding SendQueueCommand}"
+                                    Margin="0,0,12,6" />
+                        </WrapPanel>
+
+                        <TextBlock Text="Neighbor" FontWeight="SemiBold" Margin="0,6,0,0" />
+                        <WrapPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Batch" VerticalAlignment="Center" />
+                                <TextBox Width="60" Text="{Binding NeighborBatchId}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="Packet index" VerticalAlignment="Center" />
+                                <TextBox Width="60" Text="{Binding NeighborPacketIndex}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="A" VerticalAlignment="Center" />
+                                <TextBox Width="90" Text="{Binding NeighborA}" />
+                                <TextBlock Text="RSSI" VerticalAlignment="Center" />
+                                <TextBox Width="60" Text="{Binding NeighborARssi}" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,0,12,6">
+                                <TextBlock Text="B" VerticalAlignment="Center" />
+                                <TextBox Width="90" Text="{Binding NeighborB}"
+                                         PlaceholderText="blank = one entry" />
+                                <TextBlock Text="RSSI" VerticalAlignment="Center" />
+                                <TextBox Width="60" Text="{Binding NeighborBRssi}" />
+                            </StackPanel>
+                        </WrapPanel>
+                        <Button Content="Send neighbor report" Command="{Binding SendNeighborCommand}"
+                                HorizontalAlignment="Left" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Classes="card">
+                <Grid RowDefinitions="Auto,220,Auto">
+                    <TextBlock Classes="h2" Text="Received downlink commands" />
+                    <Grid Grid.Row="1">
+                        <Grid RowDefinitions="Auto,*">
+                            <Grid ColumnDefinitions="80,60,110,320,220" Margin="4,0">
+                                <TextBlock Text="Time" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="1" Text="Dst" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="2" Text="Opcode" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="3" Text="Decoded" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="4" Text="Payload" FontWeight="SemiBold" />
+                            </Grid>
+                            <ListBox Grid.Row="1" Margin="0,4,0,0"
+                                     ItemsSource="{Binding ReceivedCommands}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:ReceivedCommandRowViewModel">
+                                        <Grid ColumnDefinitions="80,60,110,320,220" Height="24"
+                                              ToolTip.Tip="{Binding RawJson}">
+                                            <TextBlock Text="{Binding TimeText}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding DstText}" />
+                                            <TextBlock Grid.Column="2" Text="{Binding OpText}" />
+                                            <TextBlock Grid.Column="3" Text="{Binding Summary}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="4" Text="{Binding Payload}"
+                                                       TextTrimming="CharacterEllipsis" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Grid>
+                    <TextBlock Grid.Row="2" Classes="muted" Margin="0,6,0,0"
+                               Text="Downlink messages are decoded with the same codec as the server." />
+                </Grid>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

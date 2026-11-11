@@ -1,4 +1,4 @@
-using BalloonMesh.Server.Protocol;
+using BalloonMesh.Protocol;
 using BalloonMesh.Server.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 

@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace BalloonMesh.Server.Protocol;
+namespace BalloonMesh.Protocol;
 
 /// <summary>
 /// Wire codec for the Bluetooth Mesh vendor messages.  The opcode encoding
@@ -40,8 +40,15 @@ public static class BalloonProtocol
     public const long TickOriginUnixMs = 1735689600000; // 2025-01-01T00:00:00Z
     public const int TickMilliseconds = 10;
 
-    public static uint VendorOpcode(byte op) =>
-        0xC00000u | ((uint)op << 16) | CompanyId;
+    public static uint VendorOpcode(byte op)
+    {
+        if (op > 0x3F)
+        {
+            throw new ArgumentOutOfRangeException(nameof(op),
+                "A vendor opcode uses six bits (0x00..0x3F).");
+        }
+        return 0xC00000u | ((uint)op << 16) | CompanyId;
+    }
 
     public static bool TryGetMessageOp(uint opcode, out byte op)
     {
@@ -178,6 +185,53 @@ public static class BalloonProtocol
             entries.Add(new NeighborEntry(address, (sbyte)payload[offset + 2]));
         }
         report = new NeighborReport(payload[0], payload[1], entries);
+        return true;
+    }
+
+    /// <summary>
+    /// Encodes up to two neighbor entries into the fixed 8-byte layout.  An
+    /// unused slot stays zero-filled; address 0 is reserved and rejected.
+    /// </summary>
+    public static byte[] EncodeNeighborReport(NeighborReport report)
+    {
+        if (report.Entries.Count > 2)
+        {
+            throw new ArgumentException("NEIGHBOR_REPORT carries at most two entries.", nameof(report));
+        }
+        var payload = new byte[8];
+        payload[0] = report.BatchId;
+        payload[1] = report.PacketIndex;
+        for (var i = 0; i < report.Entries.Count; i++)
+        {
+            var entry = report.Entries[i];
+            if (entry.MeshAddress == 0)
+            {
+                throw new ArgumentException("A neighbor entry requires a non-zero mesh address.", nameof(report));
+            }
+            var offset = 2 + i * 3;
+            BinaryPrimitives.WriteUInt16LittleEndian(payload.AsSpan(offset, 2), entry.MeshAddress);
+            payload[offset + 2] = (byte)entry.RssiDbm;
+        }
+        return payload;
+    }
+
+    /// <summary>Encodes TIME_REPORT (UTC milliseconds, little-endian, 8 bytes).</summary>
+    public static byte[] EncodeTimeReport(long unixMs)
+    {
+        var payload = new byte[8];
+        BinaryPrimitives.WriteInt64LittleEndian(payload, unixMs);
+        return payload;
+    }
+
+    /// <summary>Decodes TIME_REPORT (UTC milliseconds, little-endian, 8 bytes).</summary>
+    public static bool TryDecodeTimeReport(ReadOnlySpan<byte> payload, out long unixMs)
+    {
+        if (payload.Length != 8)
+        {
+            unixMs = 0;
+            return false;
+        }
+        unixMs = BinaryPrimitives.ReadInt64LittleEndian(payload);
         return true;
     }
 

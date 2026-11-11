@@ -1,4 +1,4 @@
-using BalloonMesh.Server.Protocol;
+using BalloonMesh.Protocol;
 
 namespace BalloonMesh.Server.Tests;
 

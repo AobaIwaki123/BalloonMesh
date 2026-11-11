@@ -1,6 +1,6 @@
 using BalloonMesh.Server.Hubs;
 using BalloonMesh.Server.Models;
-using BalloonMesh.Server.Protocol;
+using BalloonMesh.Protocol;
 
 namespace BalloonMesh.Server.Services;
 
