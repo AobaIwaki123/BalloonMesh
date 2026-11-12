@@ -92,3 +92,6 @@ Gateway トークンと Session Cookie は保存しません。起動のたび�
 - Gateway simulator の WebSocket は実機と同じ `hello` / `type=mesh`
   エンベロープを使用します。HTTP モードは `/api/gateway/{id}/events` と
   `/api/gateway/{id}/commands` を使用します。
+
+GUI を起動できない環境では、同じ Core を使う
+[`BalloonMesh.DebugTool.Cli`](../BalloonMesh.DebugTool.Cli/README.md) を利用できます。
