@@ -29,3 +29,4 @@ third_party/SvelteSharp/**/obj/
 *.db-wal
 TestResults/
 *.log
+.worktrees/
