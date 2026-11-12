@@ -214,14 +214,15 @@ public static class GatewayWebSocket
                 // already dequeued; the old writer requeues it before exiting.
                 try
                 {
-                    await previousWriter.WaitAsync(TimeSpan.FromSeconds(5))
+                    // The previous lifetime was cancelled by AttachWebSocket,
+                    // so this should complete promptly; waiting is what keeps
+                    // command ordering intact.
+                    await previousWriter.WaitAsync(cancellationToken)
                         .ConfigureAwait(false);
                 }
-                catch (TimeoutException)
+                catch (OperationCanceledException)
                 {
-                    logger.LogWarning(
-                        "Previous WebSocket writer for {Gateway} did not stop in time",
-                        client.Id);
+                    return;
                 }
                 catch (Exception exception)
                 {
