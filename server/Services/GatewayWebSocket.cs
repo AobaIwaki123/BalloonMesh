@@ -202,18 +202,15 @@ public static class GatewayWebSocket
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var command = await client.Commands.Reader.ReadAsync(cancellationToken);
+                if (!client.Requeue.TryDequeue(out var command))
+                {
+                    command = await client.Commands.Reader.ReadAsync(cancellationToken);
+                }
                 if (client.WebSocketGeneration != generation)
                 {
-                    // This writer belongs to a superseded connection.  The
-                    // command was not written anywhere; leave it for the
-                    // current writer by putting it back at the front.
-                    if (!client.Commands.Writer.TryWrite(command))
-                    {
-                        logger.LogWarning(
-                            "Dropping command for {Gateway}: stale writer could not requeue",
-                            client.Id);
-                    }
+                    // This writer belongs to a superseded connection.  Put the
+                    // command at the front of the next writer's queue.
+                    client.Requeue.Enqueue(command);
                     break;
                 }
                 var body = new

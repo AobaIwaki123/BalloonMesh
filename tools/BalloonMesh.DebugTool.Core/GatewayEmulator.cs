@@ -434,6 +434,12 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                if (!_options.Provisioned)
+                {
+                    // Match the real gateway, which only polls while ready.
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 var commands = await _api.ReadGatewayCommandsAsync(_options.GatewayId,
                     _options.PollWaitMs, cancellationToken).ConfigureAwait(false);
                 foreach (var command in commands)
@@ -480,9 +486,12 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                     .ConfigureAwait(false);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    _helloAck?.TrySetException(new WebSocketException(
-                        $"Gateway handshake rejected ({result.CloseStatus}: " +
-                        $"{result.CloseStatusDescription}). Check the gateway token."));
+                    if (IsCurrentRun(generation))
+                    {
+                        _helloAck?.TrySetException(new WebSocketException(
+                            $"Gateway handshake rejected ({result.CloseStatus}: " +
+                            $"{result.CloseStatusDescription}). Check the gateway token."));
+                    }
                     RaiseLog($"Server closed the WebSocket: {result.CloseStatus}");
                     break;
                 }
@@ -504,14 +513,20 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 stream.SetLength(0);
                 if (IsHelloAck(text))
                 {
-                    _helloAck?.TrySetResult(true);
+                    if (IsCurrentRun(generation))
+                    {
+                        _helloAck?.TrySetResult(true);
+                    }
                     continue;
                 }
                 if (GatewayProtocolCodec.TryParseDownlink(text, out var command, out var error))
                 {
                     // Any accepted mesh frame also proves the hello was
                     // accepted (older servers do not send helloAck).
-                    _helloAck?.TrySetResult(true);
+                    if (IsCurrentRun(generation))
+                    {
+                        _helloAck?.TrySetResult(true);
+                    }
                     RaiseCommand(command, text);
                 }
                 else

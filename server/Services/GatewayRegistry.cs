@@ -26,6 +26,8 @@ public sealed class GatewayClient
 
     public string Id { get; }
     public Channel<DownlinkCommand> Commands { get; }
+    /// <summary>Commands a superseded writer must deliver before new work.</summary>
+    public ConcurrentQueue<DownlinkCommand> Requeue { get; } = new();
     public bool WebSocketConnected { get; set; }
     public bool HasWebSocket { get; set; }
     public bool ProvisionedReported { get; set; }
