@@ -22,7 +22,7 @@ services:
     environment:
       ConnectionStrings__BalloonMesh: "Host=postgres;Port=5432;Database=balloonmesh;Username=balloonmesh;Password=balloonmesh;Pooling=true;Maximum Pool Size=20"
       ASPNETCORE_URLS: "http://+:5080"
-      Simulation__Enabled: "true"
+      Simulation__Enabled: "${SIMULATION_ENABLED:-true}"
     depends_on:
       postgres:
         condition: service_healthy

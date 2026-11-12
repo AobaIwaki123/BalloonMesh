@@ -16,6 +16,7 @@ set -euo pipefail
 INSTANCE_NAME="${1:-balloonmesh-server}"
 KEY_PATH="${2:-${LIGHTSAIL_KEY:-}}"
 BUNDLE_ID="${3:-small_3_0}"
+MODE="${4:---demo}"
 REGION="${AWS_DEFAULT_REGION:-ap-northeast-1}"
 KEY_NAME="${INSTANCE_NAME}-key"
 
@@ -88,6 +89,6 @@ while ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=accept-new -o ConnectTimeout
   sleep 4
 done
 
-echo "==> 6. Triggering initial deployment..."
+echo "==> 6. Triggering initial deployment (${MODE})..."
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"$DIR/lightsail-deploy.sh" "$IP" "$KEY_PATH"
+"$DIR/lightsail-deploy.sh" "$IP" "$KEY_PATH" "$MODE"
