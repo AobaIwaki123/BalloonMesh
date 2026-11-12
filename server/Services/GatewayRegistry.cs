@@ -33,12 +33,14 @@ public sealed class GatewayClient
     public bool ProvisionedReported { get; set; }
     public long WebSocketGeneration => Interlocked.Read(ref _webSocketGeneration);
     public CancellationTokenSource? WebSocketLifetime { get; set; }
+    public Task? WebSocketWriter { get; set; }
     public string? Remote { get; set; }
     public string? Firmware { get; set; }
     public bool Provisioned { get; set; }
     public int SpoolPending { get; set; }
     public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
-    public int PendingCommands => Commands.Reader.CanCount ? Commands.Reader.Count : 0;
+    public int PendingCommands =>
+        (Commands.Reader.CanCount ? Commands.Reader.Count : 0) + Requeue.Count;
 
     public long BumpWebSocketGeneration() =>
         Interlocked.Increment(ref _webSocketGeneration);
@@ -72,12 +74,14 @@ public sealed class GatewayRegistry
         return client;
     }
 
-    public long AttachWebSocket(string id, string? remote, string? firmware,
+    public (long Generation, Task? PreviousWriter) AttachWebSocket(
+        string id, string? remote, string? firmware,
         bool provisioned, int spoolPending, CancellationTokenSource lifetime)
     {
         var client = GetOrRegister(id, firmware);
         long generation;
         CancellationTokenSource? previous;
+        Task? previousWriter;
         lock (client.ConnectionGate)
         {
             // Bump first: the old handler's detach/state callbacks must see a
@@ -85,6 +89,8 @@ public sealed class GatewayRegistry
             generation = client.BumpWebSocketGeneration();
             previous = client.WebSocketLifetime;
             client.WebSocketLifetime = lifetime;
+            previousWriter = client.WebSocketWriter;
+            client.WebSocketWriter = null;
             client.Provisioned = provisioned;
             client.ProvisionedReported = true;
             client.SpoolPending = spoolPending;
@@ -106,7 +112,7 @@ public sealed class GatewayRegistry
             }
         }
         _ = NotifyChangedAsync();
-        return generation;
+        return (generation, previousWriter);
     }
 
     public async Task DetachWebSocketAsync(string id, long generation)
@@ -246,12 +252,21 @@ public sealed class GatewayRegistry
     public bool TryReadCommand(string id, out DownlinkCommand? command)
     {
         var client = GetOrRegister(id);
+        if (client.Requeue.TryDequeue(out var requeued))
+        {
+            command = requeued;
+            return true;
+        }
         return client.Commands.Reader.TryRead(out command);
     }
 
     public async Task<DownlinkCommand?> ReadCommandAsync(string id, int waitMs, CancellationToken cancellationToken)
     {
         var client = GetOrRegister(id);
+        if (client.Requeue.TryDequeue(out var requeued))
+        {
+            return requeued;
+        }
         if (waitMs <= 0)
         {
             return client.Commands.Reader.TryRead(out var immediate) ? immediate : null;

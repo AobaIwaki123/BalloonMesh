@@ -188,7 +188,7 @@ public sealed class RegressionTests
 
         Assert.Equal(0, registry.Broadcast(command));
 
-        await registry.DetachWebSocketAsync("gw-test", generation);
+        await registry.DetachWebSocketAsync("gw-test", generation.Generation);
         registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new CancellationTokenSource());
         Assert.Equal(1, registry.Broadcast(command));
     }
@@ -202,7 +202,7 @@ public sealed class RegressionTests
         var command = new DownlinkCommand(0xC010, 1, [1], 7);
         Assert.Equal(1, registry.Broadcast(command));
 
-        await registry.DetachWebSocketAsync("gw-test", generation);
+        await registry.DetachWebSocketAsync("gw-test", generation.Generation);
 
         Assert.Equal(0, registry.Broadcast(command));
     }
@@ -230,7 +230,7 @@ public sealed class RegressionTests
             spoolPending: 0, new CancellationTokenSource());
 
         registry.UpdateRuntimeState("gw-test", provisioned: false, spoolPending: 9,
-            oldGeneration);
+            oldGeneration.Generation);
 
         var gateway = Assert.Single(registry.Snapshot());
         Assert.True(gateway.Provisioned);
@@ -245,7 +245,7 @@ public sealed class RegressionTests
             provisioned: true, spoolPending: 0, new CancellationTokenSource());
         registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new CancellationTokenSource());
 
-        await registry.DetachWebSocketAsync("gw-test", oldGeneration);
+        await registry.DetachWebSocketAsync("gw-test", oldGeneration.Generation);
 
         var gateway = Assert.Single(registry.Snapshot());
         Assert.True(gateway.WebSocket);

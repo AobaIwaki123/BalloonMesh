@@ -23,6 +23,7 @@ public static class GatewayWebSocket
         string? gatewayId = null;
         long connectionGeneration = 0;
         CancellationTokenSource? connectionLifetime = null;
+        Task? previousWriter = null;
         try
         {
             var hello = await ReceiveTextAsync(socket, linked.Token);
@@ -58,13 +59,15 @@ public static class GatewayWebSocket
                 {
                     connectionLifetime = CancellationTokenSource.CreateLinkedTokenSource(
                         linked.Token);
-                    connectionGeneration = registry.AttachWebSocket(
+                    var attached = registry.AttachWebSocket(
                         gatewayId,
                         remote ?? context.Connection.RemoteIpAddress?.ToString(),
                         firmware,
                         provisioned,
                         spoolPending,
                         connectionLifetime);
+                    connectionGeneration = attached.Generation;
+                    previousWriter = attached.PreviousWriter;
                 }
             }
             catch (JsonException exception)
@@ -95,7 +98,8 @@ public static class GatewayWebSocket
 
             var client = registry.GetOrRegister(gatewayId);
             var writer = WriteCommandsAsync(socket, client, connectionToken, logger,
-                connectionGeneration);
+                connectionGeneration, previousWriter);
+            client.WebSocketWriter = writer;
             try
             {
                 while (socket.State == WebSocketState.Open &&
@@ -196,10 +200,31 @@ public static class GatewayWebSocket
         GatewayClient client,
         CancellationToken cancellationToken,
         ILogger logger,
-        long generation)
+        long generation,
+        Task? previousWriter)
     {
         try
         {
+            if (previousWriter is not null)
+            {
+                // The new writer must not overtake a command the old writer
+                // already dequeued; the old writer requeues it before exiting.
+                try
+                {
+                    await previousWriter.WaitAsync(TimeSpan.FromSeconds(5))
+                        .ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    logger.LogWarning(
+                        "Previous WebSocket writer for {Gateway} did not stop in time",
+                        client.Id);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected while the old connection is being retired.
+                }
+            }
             while (!cancellationToken.IsCancellationRequested)
             {
                 if (!client.Requeue.TryDequeue(out var command))
