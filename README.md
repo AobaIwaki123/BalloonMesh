@@ -30,7 +30,9 @@ server/                         ASP.NET Core
 tools/
   BalloonMesh.DebugTool/        Avalonia UI デスクトップデバッグツール
   BalloonMesh.DebugTool.Core/   API クライアント / Gateway エミュレータ / Protocol inspector
+  BalloonMesh.DebugTool.Cli/    ヘッドレス用デバッグ CLI
   BalloonMesh.DebugTool.Tests/  xUnit テスト (サーバ不要)
+  BalloonMesh.DebugTool.Cli.Tests/  CLI の xUnit テスト (サーバ不要)
 
 third_party/SvelteSharp/        git submodule (actbit/SvelteSharp, commit pinned)
 docs/decisions.md               未確定事項に対する今回の暫定決定
@@ -117,6 +119,14 @@ dotnet test tools/BalloonMesh.DebugTool.Tests/BalloonMesh.DebugTool.Tests.csproj
 
 （45 tests、PostgreSQL 不要）
 
+デバッグ CLI のテスト:
+
+```powershell
+dotnet test tools/BalloonMesh.DebugTool.Cli.Tests/BalloonMesh.DebugTool.Cli.Tests.csproj
+```
+
+（50 tests、PostgreSQL 不要）
+
 ### 4. デバッグツール (Avalonia UI)
 
 サーバと Gateway を実機なしで確認するための **Avalonia UI 12 / .NET 10** 製デスクトップツールです。Windows 10/11 と macOS (Intel / Apple Silicon) で動作します。
@@ -134,6 +144,31 @@ dotnet run --project tools/BalloonMesh.DebugTool/BalloonMesh.DebugTool.csproj
 - **設定**: 秘密情報を除く入力値を ApplicationData 配下に保存
 
 詳細と配布用ビルド手順は [tools/BalloonMesh.DebugTool/README.md](tools/BalloonMesh.DebugTool/README.md) を参照してください。
+
+### 5. デバッグ CLI
+
+同じ `BalloonMesh.DebugTool.Core` を使うヘッドレス用の CLI です。GUI を起動できない環境や CI から、サーバ API・擬似 Gateway・Protocol B のエンコード / デコードを確認できます。
+
+```powershell
+$cli = "tools/BalloonMesh.DebugTool.Cli/BalloonMesh.DebugTool.Cli.csproj"
+
+# ヘルスチェックと Fleet 状態
+dotnet run --project $cli -- --role Admin health
+dotnet run --project $cli -- --role Admin state
+
+# LED の即時反映（Development の Mock ログイン）
+dotnet run --project $cli -- --role Admin led now --target-kind balloon --target 0x0101 --color "#FF8000"
+
+# 擬似 Gateway を 60 秒動かし、FTM レポートを 1 件注入
+dotnet run --project $cli -- --gateway-token secret gateway run --id cli-gw --duration 60 `
+  --event ftm:anchor=1,distance=3000,batch=1
+
+# Protocol B のオフライン encode / decode
+dotnet run --project $cli -- protocol encode --op FTM_REPORT --anchor 1 --distance 3000 --batch 2
+dotnet run --project $cli -- protocol decode --opcode 0xC102E5 --payload E821F8BB00102030
+```
+
+`--json` を付けると機械可読な JSON（`gateway run` は JSON Lines）になります。全コマンドは `--help` で確認できます。詳細は [tools/BalloonMesh.DebugTool.Cli/README.md](tools/BalloonMesh.DebugTool.Cli/README.md) を参照してください。
 
 ## 認証・認可
 

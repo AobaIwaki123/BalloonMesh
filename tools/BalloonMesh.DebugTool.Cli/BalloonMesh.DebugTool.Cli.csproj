@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>BalloonMesh.DebugTool.Cli</RootNamespace>
+    <AssemblyName>BalloonMesh.DebugTool.Cli</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BalloonMesh.DebugTool.Core\BalloonMesh.DebugTool.Core.csproj" />
+  </ItemGroup>
+
+</Project>
