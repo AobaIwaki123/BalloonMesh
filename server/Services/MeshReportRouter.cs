@@ -82,13 +82,13 @@ public sealed class MeshReportRouter
                     {
                         return 0;
                     }
-                    _neighbors.Add(envelope.Src, neighbor.BatchId, neighbor.Entries,
-                        envelope.ReceivedAt);
+                    var changed = _neighbors.Add(envelope.Src, neighbor.BatchId,
+                        neighbor.Entries, envelope.ReceivedAt);
                     // A neighbor-only batch still has to be computable: when no
                     // FTM report arrived (all anchors unreachable), the first
                     // report opens the batch instead of being dropped.
                     _aggregator.NoteNeighborReport(envelope.Src, neighbor.BatchId,
-                        envelope.ReceivedAt);
+                        envelope.ReceivedAt, changed);
                     return 1;
 
                 case BalloonProtocol.OpQueueStatus:

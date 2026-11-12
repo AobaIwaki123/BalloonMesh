@@ -104,6 +104,10 @@ public sealed class LedDispatchService
         }
     }
 
+    /// <summary>
+    /// Returns the monotonic cutoff that would be used, without committing it.
+    /// NoteCutoff commits only after a reset was actually delivered.
+    /// </summary>
     public ulong NextCutoffTick(IEnumerable<ushort> addresses, ulong requested)
     {
         lock (_gate)
@@ -115,10 +119,6 @@ public sealed class LedDispatchService
                 {
                     value = last + 1;
                 }
-            }
-            foreach (var address in addresses)
-            {
-                _lastCutoff[address] = value;
             }
             return value;
         }
@@ -134,13 +134,15 @@ public sealed class LedDispatchService
             // are still pending locally; dispatching them afterwards would
             // resurrect commands the user already cancelled.
             removed.AddRange(RemovePending(item =>
-                item.ExecuteTick <= cutoffTick && Overlaps(item.Target, targets)));
+                item.ExecuteTick <= cutoffTick && CoveredBy(item.Target, targets)));
             foreach (var address in targets)
             {
                 var estimate = GetEstimate(address);
                 estimate.SentTicks.RemoveAll(tick => tick <= cutoffTick);
                 estimate.LastCutoff = Math.Max(estimate.LastCutoff, cutoffTick);
                 estimate.ReportedCount = 0;
+                _lastCutoff[address] = Math.Max(
+                    _lastCutoff.GetValueOrDefault(address), cutoffTick);
                 WriteEstimate(address, estimate);
             }
         }
@@ -154,7 +156,7 @@ public sealed class LedDispatchService
         lock (_gate)
         {
             removed.AddRange(RemovePending(item =>
-                item.ExecuteTick == executeTick && Overlaps(item.Target, targets)));
+                item.ExecuteTick == executeTick && CoveredBy(item.Target, targets)));
             foreach (var address in targets)
             {
                 var estimate = GetEstimate(address);
@@ -302,8 +304,13 @@ public sealed class LedDispatchService
         return sent;
     }
 
-    private static bool Overlaps(TargetSpec target, HashSet<ushort> addresses) =>
-        target.Balloons.Any(balloon => addresses.Contains(balloon.MeshAddress));
+    /// <summary>
+    /// True only when the cancel/reset addresses cover the reservation's whole
+    /// target.  A unicast cancel must not delete an all-balloon reservation.
+    /// </summary>
+    private static bool CoveredBy(TargetSpec target, HashSet<ushort> addresses) =>
+        target.Balloons.Count > 0 &&
+        target.Balloons.All(balloon => addresses.Contains(balloon.MeshAddress));
 
     private List<long> RemovePending(Func<PendingReservation, bool> predicate)
     {

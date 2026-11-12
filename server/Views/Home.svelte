@@ -849,7 +849,7 @@
                     class:sent={step.status === 'sent'}
                     class:canceled={step.status === 'canceled'}
                     class:expired={step.status === 'expired'}>{step.status}</span>
-              {#if step.status === 'queued' || step.status === 'sent'}
+              {#if model.canOperate && (step.status === 'queued' || step.status === 'sent')}
                 <button class="mini" onclick={() => cancelShowStep(step.id)}>Cancel</button>
               {/if}
             </li>

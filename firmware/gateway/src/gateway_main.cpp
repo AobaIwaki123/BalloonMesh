@@ -247,7 +247,9 @@ static void wifi_task(void *argument) {
     (void)argument;
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);
+    /* ESP32-C3 shares one radio between Wi-Fi and BLE Mesh.  Keep modem sleep
+     * enabled for coexistence (the balloon firmware does the same). */
+    WiFi.setSleep(true);
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
             ESP_LOGI(TAG, "connecting Wi-Fi SSID=%s", BM_GATEWAY_WIFI_SSID);

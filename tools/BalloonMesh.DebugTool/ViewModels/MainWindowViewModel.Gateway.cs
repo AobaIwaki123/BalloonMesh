@@ -114,11 +114,11 @@ public partial class MainWindowViewModel
                 "The gateway token will be sent over plain HTTP to a non-loopback host. Use HTTPS/WSS.");
         }
         var emulator = new GatewayEmulator(options);
+        _emulator = emulator;
         AttachEmulator(emulator);
         try
         {
             await emulator.StartAsync().ConfigureAwait(true);
-            _emulator = emulator;
             EmulatorRunning = emulator.IsRunning;
             EmulatorStatus = $"{GatewayTransportMode} gateway '{options.GatewayId}' started.";
             AddLog("info", EmulatorStatus);
@@ -128,6 +128,7 @@ public partial class MainWindowViewModel
         {
             DetachEmulator(emulator);
             emulator.Dispose();
+            _emulator = null;
             EmulatorRunning = false;
             EmulatorStatus = $"Start failed: {exception.Message}";
             throw;

@@ -96,7 +96,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、39 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、41 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 
@@ -375,7 +375,7 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 ## 既知の制約・注意
 
 1. **BLE Mesh Node のビルド構成**
-   `balloon` と `gateway` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込みます。`sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y`、`CONFIG_BLE_MESH_SETTINGS=y`、`CONFIG_ESP_WIFI_FTM_ENABLE=y` を有効にして Bluetooth / Wi-Fi スタックをソースからビルドするため、Arduino 同梱のプリビルド `libbt.a` は使いません。`-DCONFIG_BLE_MESH_NODE=1` も不要です。Provisioning 情報（ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、SEQ/RPL）は NVS に保存され、再起動後も復元されます。初回ビルドは ESP-IDF 全体を作るため時間がかかりますが、2 回目以降は差分ビルドになります。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
+   `balloon` と `gateway` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込みます。`sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y` と `CONFIG_BLE_MESH_SETTINGS=y` を有効にして Bluetooth スタックをソースからビルドするため、Arduino 同梱のプリビルド `libbt.a` は使いません。`balloon` はさらに `CONFIG_ESP_WIFI_FTM_ENABLE=y` / `CONFIG_ESP_WIFI_FTM_INITIATOR_SUPPORT=y` を有効にします。`-DCONFIG_BLE_MESH_NODE=1` も不要です。Provisioning 情報（ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、SEQ/RPL）は NVS に保存され、再起動後も復元されます。初回ビルドは ESP-IDF 全体を作るため時間がかかりますが、2 回目以降は差分ビルドになります。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
 2. **Gateway の Protocol C**  
    サーバは WebSocket と HTTP ポーリングの両方を実装しています。Arduino Gateway は既定で WebSocket（`BM_GATEWAY_USE_WEBSOCKET=1`）を使用し、`BM_SERVER_URL` が `https://` の場合は WSS になります。HTTP ポーリングへ戻す場合は `platformio.ini` のフラグを 0 にしてください。CA を `BM_TLS_CA_CERT` で指定しない場合は証明書ピン留めなしになるため、本番では必ず CA を設定してください。
 3. **FTM timestamp** と **NEIGHBOR_REPORT の 2 件/パケット** は仕様未確定のため暫定値です。実装凍結前に [docs/decisions.md](docs/decisions.md) の項目を確定してください。

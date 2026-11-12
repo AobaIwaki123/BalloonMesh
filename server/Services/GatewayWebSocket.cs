@@ -33,15 +33,14 @@ public static class GatewayWebSocket
             {
                 using var document = JsonDocument.Parse(hello);
                 var root = document.RootElement;
-                if (root.TryGetProperty("type", out var type)
-                    && string.Equals(type.GetString(), "hello", StringComparison.OrdinalIgnoreCase)
-                    && root.TryGetProperty("gatewayId", out var id))
+                var helloType = ReadString(root, "type");
+                if (string.Equals(helloType, "hello", StringComparison.OrdinalIgnoreCase))
                 {
-                    gatewayId = id.GetString();
+                    gatewayId = ReadString(root, "gatewayId");
                 }
-                var remote = root.TryGetProperty("name", out var name) ? name.GetString() : null;
-                var firmware = root.TryGetProperty("firmware", out var version) ? version.GetString() : null;
-                var token = root.TryGetProperty("token", out var tokenValue) ? tokenValue.GetString() : null;
+                var remote = ReadString(root, "name");
+                var firmware = ReadString(root, "firmware");
+                var token = ReadString(root, "token");
                 var provisioned = root.TryGetProperty("provisioned", out var provValue) &&
                                   provValue.ValueKind == JsonValueKind.True;
                 var spoolPending = root.TryGetProperty("spoolPending", out var spoolValue) &&
@@ -105,14 +104,32 @@ public static class GatewayWebSocket
                     {
                         using var document = JsonDocument.Parse(text);
                         var root = document.RootElement;
-                        if (root.TryGetProperty("type", out var type)
-                            && string.Equals(type.GetString(), "mesh", StringComparison.OrdinalIgnoreCase))
+                        var messageType = ReadString(root, "type");
+                        if (string.Equals(messageType, "mesh", StringComparison.OrdinalIgnoreCase))
                         {
                             var message = JsonSerializer.Deserialize<GatewayEventDto>(text, Json);
                             if (message is not null)
                             {
                                 router.Handle(message, gatewayId);
                             }
+                        }
+                        else if (string.Equals(messageType, "hello",
+                                     StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(messageType, "state",
+                                     StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Readiness can change after the initial hello (for
+                            // example when provisioning or AppKey binding
+                            // completes), so accept later status updates too.
+                            bool? provisioned = root.TryGetProperty("provisioned",
+                                out var prov)
+                                ? prov.ValueKind == JsonValueKind.True
+                                : null;
+                            var spool = root.TryGetProperty("spoolPending", out var spoolValue) &&
+                                        spoolValue.TryGetInt32(out var spoolCount)
+                                ? spoolCount
+                                : (int?)null;
+                            registry.UpdateRuntimeState(gatewayId, provisioned, spool);
                         }
                     }
                     catch (JsonException exception)
@@ -132,7 +149,6 @@ public static class GatewayWebSocket
                 {
                     // expected on disconnect
                 }
-                await registry.DetachWebSocketAsync(gatewayId, connectionGeneration);
             }
         }
         catch (OperationCanceledException)
@@ -145,6 +161,13 @@ public static class GatewayWebSocket
         }
         finally
         {
+            // Detach even when the hello ack send failed before the command
+            // writer loop started, otherwise the registry keeps a dead
+            // WebSocket as a reachable gateway.
+            if (connectionGeneration != 0 && !string.IsNullOrWhiteSpace(gatewayId))
+            {
+                await registry.DetachWebSocketAsync(gatewayId, connectionGeneration);
+            }
             if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
                 try
@@ -192,6 +215,12 @@ public static class GatewayWebSocket
             logger.LogInformation(exception, "Gateway command writer stopped");
         }
     }
+
+    private static string? ReadString(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) &&
+        value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     private static async Task<string?> ReceiveTextAsync(WebSocket socket, CancellationToken cancellationToken)
     {

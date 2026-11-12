@@ -117,23 +117,7 @@ public sealed class MockProvisioningService
         }
         else
         {
-            ushort? address;
-            lock (_gate)
-            {
-                if (session != _session)
-                {
-                    return;
-                }
-                address = NextAddressLocked();
-            }
-            if (!Update(id, session, device => device with
-                {
-                    State = "provisioned",
-                    Progress = 100,
-                    MeshAddress = address,
-                    Error = null,
-                    UpdatedAt = DateTimeOffset.UtcNow
-                }))
+            if (!MarkProvisioned(id, session, out var address))
             {
                 return;
             }
@@ -141,6 +125,36 @@ public sealed class MockProvisioningService
                 id, address ?? 0);
         }
         await NotifyAsync();
+    }
+
+    private bool MarkProvisioned(string id, int session, out ushort? address)
+    {
+        address = null;
+        lock (_gate)
+        {
+            if (session != _session)
+            {
+                return false;
+            }
+            var index = _devices.FindIndex(device =>
+                string.Equals(device.Id, id, StringComparison.Ordinal));
+            if (index < 0)
+            {
+                return false;
+            }
+            // Allocate and apply under the same lock so two concurrent
+            // simulations cannot pick the same address.
+            address = NextAddressLocked();
+            _devices[index] = _devices[index] with
+            {
+                State = "provisioned",
+                Progress = 100,
+                MeshAddress = address,
+                Error = null,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            return true;
+        }
     }
 
     private bool Update(string id, int session,

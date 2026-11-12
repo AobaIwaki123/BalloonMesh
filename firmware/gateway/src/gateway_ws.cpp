@@ -158,10 +158,19 @@ static void websocket_event_handler(void *arg, esp_event_base_t base, int32_t id
 
 static void ws_sender_task(void *argument) {
     (void)argument;
+    bool last_ready = false;
     for (;;) {
         if (!s_connected || s_client == NULL) {
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
+        }
+        // The initial hello is sent before provisioning/AppKey binding may
+        // finish.  Send a fresh hello when readiness changes so the server
+        // starts routing downlinks without waiting for a reconnect.
+        bool ready = bm_gateway_mesh_is_ready();
+        if (ready != last_ready) {
+            last_ready = ready;
+            send_hello();
         }
         bm_gateway_event_t event;
         uint32_t sequence = 0;

@@ -86,6 +86,23 @@ public sealed class RegressionTests
     }
 
     [Fact]
+    public void UnicastCancelDoesNotRemoveAnAllBalloonReservation()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var at = services.Time.GetUtcNow().AddMinutes(2);
+        var tick = BalloonProtocol.Tick40FromUnixMs(at.ToUnixTimeMilliseconds());
+        Assert.True(services.Dispatch.EnqueueScheduled(
+            services.Fleet.ResolveTarget("all", "all"), tick, at, 1, 2, 3,
+            showStepId: 43));
+
+        var removed = services.Dispatch.NoteCancel([0x0101], tick);
+
+        Assert.Empty(removed);
+        Assert.Equal(1, services.Dispatch.PendingCount);
+    }
+
+    [Fact]
     public async Task CancellingAPastReservationIsRejected()
     {
         using var database = new TemporaryDatabase();
@@ -109,13 +126,35 @@ public sealed class RegressionTests
         using var database = new TemporaryDatabase();
         var services = CreateServices(database);
         var now = services.Time.GetUtcNow();
-        services.Neighbors.Add(0x0101, 7,
-            [new NeighborEntry(0x0102, -50)], now);
-        services.Aggregator.NoteNeighborReport(0x0101, 7, now);
+        Assert.True(services.Neighbors.Add(0x0101, 7,
+            [new NeighborEntry(0x0102, -50)], now));
+        services.Aggregator.NoteNeighborReport(0x0101, 7, now, observationsChanged: true);
 
         services.Time.Advance(TimeSpan.FromSeconds(10));
         Assert.Equal(1, await services.Aggregator.ProcessDueAsync(services.Time.GetUtcNow()));
         Assert.NotEqual("seed", services.Fleet.GetBalloon(0x0101)!.LastMethod);
+    }
+
+    [Fact]
+    public async Task DuplicateNeighborReportDoesNotRecomputeTheSamePosition()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var now = services.Time.GetUtcNow();
+        var entry = new NeighborEntry(0x0102, -50);
+        Assert.True(services.Neighbors.Add(0x0101, 7, [entry], now));
+        services.Aggregator.NoteNeighborReport(0x0101, 7, now, observationsChanged: true);
+        services.Time.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await services.Aggregator.ProcessDueAsync(services.Time.GetUtcNow()));
+        var history = services.Fleet.GetHistory(0x0101, 100).Count;
+
+        Assert.False(services.Neighbors.Add(0x0101, 7, [entry],
+            services.Time.GetUtcNow()));
+        services.Aggregator.NoteNeighborReport(0x0101, 7, services.Time.GetUtcNow(),
+            observationsChanged: false);
+
+        Assert.Equal(0, await services.Aggregator.ProcessDueAsync(services.Time.GetUtcNow()));
+        Assert.Equal(history, services.Fleet.GetHistory(0x0101, 100).Count);
     }
 
     [Fact]
@@ -129,6 +168,14 @@ public sealed class RegressionTests
         Assert.Equal(12.345, updated.Lat!.Value, 6);
         Assert.Equal(67.890, updated.Lon!.Value, 6);
         Assert.Equal("initial", updated.LastMethod);
+
+        // A real fix must not be overwritten by a later initial-position edit.
+        database.Store.UpdatePosition(0x0101, 1.0, 2.0, 0.9, 1, "ftm",
+            DateTimeOffset.UtcNow);
+        var afterFix = fleet.SetInitialPosition(0x0101, 3.0, 4.0);
+        Assert.Equal(1.0, afterFix.Lat!.Value, 6);
+        Assert.Equal(2.0, afterFix.Lon!.Value, 6);
+        Assert.Equal("ftm", afterFix.LastMethod);
     }
 
     [Fact]

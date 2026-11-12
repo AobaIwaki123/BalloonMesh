@@ -19,21 +19,32 @@ public sealed class NeighborStore
     private readonly ConcurrentDictionary<(ushort Src, byte Batch), ConcurrentDictionary<ushort, NeighborObservation>> _batches = new();
     private readonly ConcurrentDictionary<(ushort Src, byte Batch), DateTimeOffset> _lastSeen = new();
 
-    public void Add(ushort source, byte batchId, IEnumerable<NeighborEntry> entries, DateTimeOffset receivedAt)
+    /// <summary>Returns true when an entry was added or a stronger RSSI won.</summary>
+    public bool Add(ushort source, byte batchId, IEnumerable<NeighborEntry> entries,
+        DateTimeOffset receivedAt)
     {
         var key = (source, batchId);
         _lastSeen[key] = receivedAt;
         Sweep(now: receivedAt);
-        var batch = _batches.GetOrAdd(key, static _ => new ConcurrentDictionary<ushort, NeighborObservation>());
+        var batch = _batches.GetOrAdd(key, static _ =>
+            new ConcurrentDictionary<ushort, NeighborObservation>());
+        var changed = false;
         foreach (var entry in entries)
         {
-            batch.AddOrUpdate(
-                entry.MeshAddress,
-                _ => new NeighborObservation(entry.MeshAddress, entry.RssiDbm, receivedAt),
-                (_, existing) => entry.RssiDbm > existing.RssiDbm
-                    ? new NeighborObservation(entry.MeshAddress, entry.RssiDbm, receivedAt)
-                    : existing);
+            if (!batch.TryGetValue(entry.MeshAddress, out var existing))
+            {
+                batch[entry.MeshAddress] = new NeighborObservation(
+                    entry.MeshAddress, entry.RssiDbm, receivedAt);
+                changed = true;
+            }
+            else if (entry.RssiDbm > existing.RssiDbm)
+            {
+                batch[entry.MeshAddress] = new NeighborObservation(
+                    entry.MeshAddress, entry.RssiDbm, receivedAt);
+                changed = true;
+            }
         }
+        return changed;
     }
 
     public IReadOnlyList<NeighborObservation> Get(ushort source, byte batchId) =>

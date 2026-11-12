@@ -101,7 +101,8 @@ public sealed class FtmAggregator
     /// unreachable), opening a batch here lets the neighbor-only fallback
     /// produce a position instead of being discarded.
     /// </summary>
-    public void NoteNeighborReport(ushort source, byte batchId, DateTimeOffset receivedAt)
+    public void NoteNeighborReport(ushort source, byte batchId, DateTimeOffset receivedAt,
+        bool observationsChanged)
     {
         var key = new BatchKey(source, batchId);
         if (_closed.TryGetValue(key, out var closedAt)
@@ -117,10 +118,12 @@ public sealed class FtmAggregator
             {
                 return;
             }
+            var opened = false;
             if (!_batches.TryGetValue(key, out var batch))
             {
                 batch = new BatchState(receivedAt);
                 _batches[key] = batch;
+                opened = true;
                 _logger.LogInformation(
                     "neighbor-only batch {Source:X4}/{Batch} opened at {T0:O}",
                     source, batchId, receivedAt);
@@ -130,7 +133,12 @@ public sealed class FtmAggregator
                 return;
             }
             batch.HasNeighborReport = true;
-            batch.Changed = true;
+            // Duplicate reports from a second gateway must not force another
+            // identical compute/history sample.
+            if (opened || observationsChanged)
+            {
+                batch.Changed = true;
+            }
         }
     }
 
@@ -191,8 +199,11 @@ public sealed class FtmAggregator
                 batch.Closed = true;
                 _batches.Remove(key);
                 _closed[key] = now;
-                if (batch.Reports.Count == 0)
+                if (!shouldCompute)
                 {
+                    // No final compute will read the observations, so they can
+                    // be removed now.  When a final compute is scheduled,
+                    // ComputeAsync removes them in its finally block.
                     _neighbors.Remove(key.Source, key.Batch);
                 }
             }

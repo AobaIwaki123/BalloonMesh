@@ -19,7 +19,8 @@ BalloonMesh サーバと BLE Mesh Gateway の動作を、実機なしで確認�
 - **Gateway simulator**: WebSocket または HTTP ポーリングで擬似 Gateway を
   起動し、サーバからの下りコマンドを Protocol B としてデコード表示します。
   受信一覧の **Open** で payload を Protocol タブへ送れます。
-  FTM_REPORT、QUEUE_STATUS、NEIGHBOR_REPORT を手動またはバッチで注入できます。
+  FTM_REPORT、QUEUE_STATUS、NEIGHBOR_REPORT を手動で注入できます
+  （FTM は 4 anchor 分のバッチ送信にも対応）。
   HTTP ポーリングの TX/RX raw JSON は、実際の HTTP バッチではなく
   メッシュメッセージ単位に合成した `type=mesh` フレームです。
 - **Protocol**: 既知の Vendor Opcode をプリセットから生成し、任意の

@@ -39,6 +39,7 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
     private CancellationTokenSource? _runCts;
     private Task? _loop;
     private ClientWebSocket? _socket;
+    private TaskCompletionSource<bool>? _helloAck;
     private bool _loopAlive;
     private long _runGeneration;
     private bool _disposed;
@@ -148,13 +149,14 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 }
 
                 long generation;
+                var ack = new TaskCompletionSource<bool>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
                 lock (_gate)
                 {
+                    _helloAck = _options.Transport == GatewayTransport.WebSocket ? ack : null;
                     _loopAlive = true;
                     generation = ++_runGeneration;
                 }
-                RaiseConnection(true,
-                    $"{TransportName(_options.Transport)} connected as {_options.GatewayId}");
                 lock (_gate)
                 {
                     _loop = _options.Transport == GatewayTransport.WebSocket
@@ -163,6 +165,27 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                         : Task.Run(() => PollLoopAsync(cts.Token, generation),
                             CancellationToken.None);
                 }
+
+                if (_options.Transport == GatewayTransport.WebSocket)
+                {
+                    // The receive loop is already running, so a timeout here
+                    // leaves the socket usable for older servers that do not
+                    // send helloAck.  A close/rejection still fails Start.
+                    using var ackTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+                        cts.Token);
+                    ackTimeout.CancelAfter(TimeSpan.FromSeconds(5));
+                    try
+                    {
+                        await ack.Task.WaitAsync(ackTimeout.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cts.IsCancellationRequested)
+                    {
+                        // Older server: assume the still-open socket is usable.
+                    }
+                }
+
+                RaiseConnection(true,
+                    $"{TransportName(_options.Transport)} connected as {_options.GatewayId}");
             }
             catch
             {
@@ -170,6 +193,8 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 {
                     _runCts = null;
                     _loopAlive = false;
+                    _loop = null;
+                    _helloAck = null;
                 }
                 cts.Cancel();
                 cts.Dispose();
@@ -382,7 +407,6 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
             await socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
             await SendOnSocketAsync(socket, GatewayProtocolCodec.CreateHello(options),
                 cancellationToken).ConfigureAwait(false);
-            await WaitForHelloAckAsync(socket, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -448,6 +472,9 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                     .ConfigureAwait(false);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
+                    _helloAck?.TrySetException(new WebSocketException(
+                        $"Gateway handshake rejected ({result.CloseStatus}: " +
+                        $"{result.CloseStatusDescription}). Check the gateway token."));
                     RaiseLog($"Server closed the WebSocket: {result.CloseStatus}");
                     break;
                 }
@@ -467,8 +494,16 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 }
                 var text = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
                 stream.SetLength(0);
+                if (IsHelloAck(text))
+                {
+                    _helloAck?.TrySetResult(true);
+                    continue;
+                }
                 if (GatewayProtocolCodec.TryParseDownlink(text, out var command, out var error))
                 {
+                    // Any accepted mesh frame also proves the hello was
+                    // accepted (older servers do not send helloAck).
+                    _helloAck?.TrySetResult(true);
                     RaiseCommand(command, text);
                 }
                 else
@@ -483,14 +518,18 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
         catch (WebSocketException exception)
         {
+            _helloAck?.TrySetException(exception);
             RaiseLog($"WebSocket closed: {exception.Message}");
         }
         catch (Exception exception)
         {
+            _helloAck?.TrySetException(exception);
             RaiseLog($"WebSocket receive failed: {exception.Message}");
         }
         finally
         {
+            _helloAck?.TrySetException(new WebSocketException(
+                "The WebSocket disconnected before the gateway handshake completed."));
             // The server closed or the read failed: release the socket now so
             // a restart does not leak the old connection.
             DisposeSocket();
@@ -498,66 +537,19 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
     }
 
-    private async Task WaitForHelloAckAsync(ClientWebSocket socket,
-        CancellationToken cancellationToken)
+    private static bool IsHelloAck(string text)
     {
-        // The server rejects a bad token immediately after hello.  Waiting for
-        // its explicit ack turns that into a failed Start instead of a brief
-        // "connected" state that the receive loop discovers later.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
-        var buffer = new byte[4096];
-        using var stream = new MemoryStream();
         try
         {
-            while (true)
-            {
-                var result = await socket.ReceiveAsync(buffer, timeout.Token)
-                    .ConfigureAwait(false);
-                if (result.MessageType == WebSocketMessageType.Close)
-                {
-                    throw new WebSocketException(
-                        $"Gateway handshake rejected ({result.CloseStatus}: " +
-                        $"{result.CloseStatusDescription}). Check the gateway token.");
-                }
-                if (result.MessageType != WebSocketMessageType.Text)
-                {
-                    continue;
-                }
-                stream.Write(buffer, 0, result.Count);
-                if (stream.Length > 1024 * 1024)
-                {
-                    throw new WebSocketException("Gateway handshake response was too large.");
-                }
-                if (!result.EndOfMessage)
-                {
-                    continue;
-                }
-                var text = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
-                stream.SetLength(0);
-                using var document = JsonDocument.Parse(text);
-                if (document.RootElement.TryGetProperty("type", out var type) &&
-                    string.Equals(type.GetString(), "helloAck", StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-                // A very fast downlink could arrive before the ack; keep it
-                // visible and continue waiting.
-                if (GatewayProtocolCodec.TryParseDownlink(text, out var command, out _))
-                {
-                    RaiseCommand(command, text);
-                }
-            }
+            using var document = JsonDocument.Parse(text);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty("type", out var type) &&
+                   string.Equals(type.GetString(), "helloAck",
+                       StringComparison.OrdinalIgnoreCase);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (JsonException)
         {
-            // Older servers do not send an ack; fall back to the previous
-            // behaviour rather than failing a connection that is still open.
-        }
-        catch (JsonException exception)
-        {
-            throw new WebSocketException("Gateway handshake response was not valid JSON.",
-                exception);
+            return false;
         }
     }
 

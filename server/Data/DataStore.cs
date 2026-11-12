@@ -513,8 +513,14 @@ public sealed class DataStore
             command.CommandText = """
                 UPDATE balloons
                 SET initial_lat = @lat, initial_lon = @lon,
-                    lat = @lat, lon = @lon,
-                    last_method = 'initial', updated_at = @updated
+                    lat = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                               THEN @lat ELSE lat END,
+                    lon = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                               THEN @lon ELSE lon END,
+                    last_method = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                                       THEN 'initial' ELSE last_method END,
+                    updated_at = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                                      THEN @updated ELSE updated_at END
                 WHERE mesh_address = @addr;
                 """;
             command.Parameters.AddWithValue("lat", lat);
