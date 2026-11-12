@@ -31,17 +31,28 @@ public sealed class NeighborStore
         var changed = false;
         foreach (var entry in entries)
         {
-            if (!batch.TryGetValue(entry.MeshAddress, out var existing))
+            var observation = new NeighborObservation(
+                entry.MeshAddress, entry.RssiDbm, receivedAt);
+            while (true)
             {
-                batch[entry.MeshAddress] = new NeighborObservation(
-                    entry.MeshAddress, entry.RssiDbm, receivedAt);
-                changed = true;
-            }
-            else if (entry.RssiDbm > existing.RssiDbm)
-            {
-                batch[entry.MeshAddress] = new NeighborObservation(
-                    entry.MeshAddress, entry.RssiDbm, receivedAt);
-                changed = true;
+                if (!batch.TryGetValue(entry.MeshAddress, out var existing))
+                {
+                    if (batch.TryAdd(entry.MeshAddress, observation))
+                    {
+                        changed = true;
+                        break;
+                    }
+                    continue;
+                }
+                if (entry.RssiDbm <= existing.RssiDbm)
+                {
+                    break;
+                }
+                if (batch.TryUpdate(entry.MeshAddress, observation, existing))
+                {
+                    changed = true;
+                    break;
+                }
             }
         }
         return changed;

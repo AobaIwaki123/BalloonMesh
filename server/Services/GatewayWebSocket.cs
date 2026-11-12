@@ -22,6 +22,7 @@ public static class GatewayWebSocket
             cancellationToken, context.RequestAborted);
         string? gatewayId = null;
         long connectionGeneration = 0;
+        CancellationTokenSource? connectionLifetime = null;
         try
         {
             var hello = await ReceiveTextAsync(socket, linked.Token);
@@ -55,12 +56,15 @@ public static class GatewayWebSocket
                 }
                 if (!string.IsNullOrWhiteSpace(gatewayId))
                 {
+                    connectionLifetime = CancellationTokenSource.CreateLinkedTokenSource(
+                        linked.Token);
                     connectionGeneration = registry.AttachWebSocket(
                         gatewayId,
                         remote ?? context.Connection.RemoteIpAddress?.ToString(),
                         firmware,
                         provisioned,
-                        spoolPending);
+                        spoolPending,
+                        connectionLifetime);
                 }
             }
             catch (JsonException exception)
@@ -78,6 +82,7 @@ public static class GatewayWebSocket
                 return;
             }
 
+            var connectionToken = connectionLifetime?.Token ?? linked.Token;
             // Explicit acknowledgement so a client can distinguish "connected
             // and accepted" from "connected, then rejected after hello".  Real
             // gateways ignore unknown message types.
@@ -86,15 +91,17 @@ public static class GatewayWebSocket
                 type = "helloAck",
                 gatewayId
             }, Json);
-            await socket.SendAsync(ack, WebSocketMessageType.Text, true, linked.Token);
+            await socket.SendAsync(ack, WebSocketMessageType.Text, true, connectionToken);
 
             var client = registry.GetOrRegister(gatewayId);
-            var writer = WriteCommandsAsync(socket, client, linked.Token, logger);
+            var writer = WriteCommandsAsync(socket, client, connectionToken, logger,
+                connectionGeneration);
             try
             {
-                while (socket.State == WebSocketState.Open && !linked.IsCancellationRequested)
+                while (socket.State == WebSocketState.Open &&
+                       !connectionToken.IsCancellationRequested)
                 {
-                    var text = await ReceiveTextAsync(socket, linked.Token);
+                    var text = await ReceiveTextAsync(socket, connectionToken);
                     if (text is null)
                     {
                         break;
@@ -129,7 +136,8 @@ public static class GatewayWebSocket
                                         spoolValue.TryGetInt32(out var spoolCount)
                                 ? spoolCount
                                 : (int?)null;
-                            registry.UpdateRuntimeState(gatewayId, provisioned, spool);
+                            registry.UpdateRuntimeState(gatewayId, provisioned, spool,
+                                connectionGeneration);
                         }
                     }
                     catch (JsonException exception)
@@ -187,13 +195,27 @@ public static class GatewayWebSocket
         WebSocket socket,
         GatewayClient client,
         CancellationToken cancellationToken,
-        ILogger logger)
+        ILogger logger,
+        long generation)
     {
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 var command = await client.Commands.Reader.ReadAsync(cancellationToken);
+                if (client.WebSocketGeneration != generation)
+                {
+                    // This writer belongs to a superseded connection.  The
+                    // command was not written anywhere; leave it for the
+                    // current writer by putting it back at the front.
+                    if (!client.Commands.Writer.TryWrite(command))
+                    {
+                        logger.LogWarning(
+                            "Dropping command for {Gateway}: stale writer could not requeue",
+                            client.Id);
+                    }
+                    break;
+                }
                 var body = new
                 {
                     type = "mesh",

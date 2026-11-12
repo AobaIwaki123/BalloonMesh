@@ -77,7 +77,7 @@ static void build_uri(void) {
     snprintf(s_uri, sizeof(s_uri), "%s%.*s/ws/gateway", scheme, (int)rest_len, rest);
 }
 
-static void send_hello(void) {
+static bool send_hello(void) {
     char hello[256];
     snprintf(hello, sizeof(hello),
              "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
@@ -85,8 +85,8 @@ static void send_hello(void) {
              BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
              bm_gateway_mesh_is_ready() ? "true" : "false",
              (unsigned)bm_gateway_spool_count());
-    esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
-                                   pdMS_TO_TICKS(3000));
+    return esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
+                                          pdMS_TO_TICKS(3000)) >= 0;
 }
 
 static void handle_downlink(const char *text, int length) {
@@ -161,16 +161,17 @@ static void ws_sender_task(void *argument) {
     bool last_ready = false;
     for (;;) {
         if (!s_connected || s_client == NULL) {
+            last_ready = false;
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
         // The initial hello is sent before provisioning/AppKey binding may
         // finish.  Send a fresh hello when readiness changes so the server
-        // starts routing downlinks without waiting for a reconnect.
+        // starts routing downlinks without waiting for a reconnect.  Only
+        // commit the transition after a successful send.
         bool ready = bm_gateway_mesh_is_ready();
-        if (ready != last_ready) {
+        if (ready != last_ready && send_hello()) {
             last_ready = ready;
-            send_hello();
         }
         bm_gateway_event_t event;
         uint32_t sequence = 0;

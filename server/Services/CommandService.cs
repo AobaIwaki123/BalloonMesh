@@ -14,6 +14,7 @@ public sealed class CommandService
     private readonly IMonitorEvents _notifier;
     private readonly TimeProvider _time;
     private readonly ILogger<CommandService> _logger;
+    private readonly SemaphoreSlim _resetGate = new(1, 1);
 
     public CommandService(
         FleetService fleet,
@@ -180,6 +181,11 @@ public sealed class CommandService
     {
         var target = _fleet.ResolveTarget(request.TargetKind, request.Target);
         var addresses = target.Balloons.Select(balloon => balloon.MeshAddress).ToArray();
+        // Serialize reset cutoff allocation through delivery: concurrent
+        // resets must not reuse the same monotonic cutoff.
+        await _resetGate.WaitAsync(cancellationToken);
+        try
+        {
         var requested = request.CutoffAt is { } cutoff
             ? BalloonProtocol.Tick40FromUnixMs(cutoff.ToUniversalTime().ToUnixTimeMilliseconds())
             : BalloonProtocol.NowTick40(_time);
@@ -223,6 +229,11 @@ public sealed class CommandService
             Convert.ToHexString(payload));
         await _notifier.CommandSentAsync(result);
         return result;
+        }
+        finally
+        {
+            _resetGate.Release();
+        }
     }
 
     private async Task<CommandResultDto> RejectImmediateAsync(

@@ -93,14 +93,9 @@ static void upload_events_task(void *argument) {
             continue;
         }
         bm_gateway_event_t events[12];
-        uint16_t count = 0;
-        uint32_t last_sequence = 0;
-        uint16_t available = bm_gateway_spool_count();
-        while (count < 12 && count < available &&
-               bm_gateway_spool_peek_seq((uint16_t)count, &events[count],
-                                         &last_sequence)) {
-            count++;
-        }
+        uint32_t sequences[12];
+        uint16_t count = bm_gateway_spool_snapshot(events, sequences, 12);
+        uint32_t last_sequence = count > 0 ? sequences[count - 1] : 0;
         if (count == 0) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;

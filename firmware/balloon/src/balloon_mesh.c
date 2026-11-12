@@ -643,11 +643,12 @@ bool bm_balloon_mesh_send(uint32_t opcode,
     return true;
 }
 
-void bm_balloon_mesh_publish_queue_status(uint8_t kind, uint16_t queue_count) {
+bool bm_balloon_mesh_publish_queue_status(uint8_t kind, uint16_t queue_count) {
     bm_queue_status_t status = {.kind = kind, .queue_count = queue_count};
     uint8_t payload[3];
-    if (bm_encode_queue_status(payload, sizeof(payload), &status) == 3) {
-        bm_balloon_mesh_send(BM_VENDOR_OPCODE(BM_OP_QUEUE_STATUS),
-                             BM_GROUP_QUEUE_STATUS, 7, payload, 3);
+    if (bm_encode_queue_status(payload, sizeof(payload), &status) != 3) {
+        return false;
     }
+    return bm_balloon_mesh_send(BM_VENDOR_OPCODE(BM_OP_QUEUE_STATUS),
+                                BM_GROUP_QUEUE_STATUS, 7, payload, 3);
 }

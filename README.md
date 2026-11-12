@@ -96,7 +96,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、41 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、44 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 

@@ -243,6 +243,24 @@ bool bm_gateway_spool_peek_seq(uint16_t index, bm_gateway_event_t *out,
     return ok;
 }
 
+uint16_t bm_gateway_spool_snapshot(bm_gateway_event_t *events,
+                                   uint32_t *sequences, uint16_t max) {
+    if (!s_spool.ready || events == NULL || sequences == NULL || max == 0) {
+        return 0;
+    }
+    uint16_t count = 0;
+    if (xSemaphoreTake(s_spool.lock, pdMS_TO_TICKS(20)) == pdTRUE) {
+        count = s_spool.count > max ? max : s_spool.count;
+        for (uint16_t i = 0; i < count; ++i) {
+            uint16_t slot = (uint16_t)((s_spool.head + i) % BM_SPOOL_CAPACITY);
+            events[i] = s_spool.events[slot];
+            sequences[i] = s_spool.sequences[slot];
+        }
+        xSemaphoreGive(s_spool.lock);
+    }
+    return count;
+}
+
 void bm_gateway_spool_drop_through(uint32_t sequence) {
     if (!s_spool.ready) {
         return;

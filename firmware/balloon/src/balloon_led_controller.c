@@ -24,6 +24,10 @@ typedef struct {
     bool initialized;
     bool dirty;
     uint32_t last_save_ms;
+    bool status_pending;
+    uint8_t status_kind;
+    uint16_t status_count;
+    uint32_t last_status_attempt_ms;
 } bm_led_controller_t;
 
 static bm_led_controller_t s_controller;
@@ -33,7 +37,30 @@ static void send_monitor_event_locked(int event, uint16_t count) {
         return;
     }
     uint8_t kind = event == 1 ? BM_QUEUE_STATUS_NEAR_FULL : BM_QUEUE_STATUS_RECOVERED;
-    s_controller.sender(kind, count);
+    s_controller.last_status_attempt_ms =
+        (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_controller.sender(kind, count)) {
+        s_controller.status_pending = false;
+    } else {
+        /* The mesh may not be bound yet (for example right after boot), so
+         * keep the transition and retry instead of losing it. */
+        s_controller.status_pending = true;
+        s_controller.status_kind = kind;
+        s_controller.status_count = count;
+    }
+}
+
+static void retry_pending_status_locked(uint32_t now_ms) {
+    if (!s_controller.status_pending || s_controller.sender == NULL) {
+        return;
+    }
+    if ((uint32_t)(now_ms - s_controller.last_status_attempt_ms) < 5000u) {
+        return;
+    }
+    s_controller.last_status_attempt_ms = now_ms;
+    if (s_controller.sender(s_controller.status_kind, s_controller.status_count)) {
+        s_controller.status_pending = false;
+    }
 }
 
 static void mark_dirty_locked(void) {
@@ -74,6 +101,7 @@ static void led_task(void *argument) {
             }
 
             uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            retry_pending_status_locked(now_ms);
             if (s_controller.dirty &&
                 (uint32_t)(now_ms - s_controller.last_save_ms) >= 2000u) {
                 snapshot = (bm_led_queue_t *)malloc(sizeof(*snapshot));

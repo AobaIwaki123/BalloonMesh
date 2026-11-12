@@ -9,7 +9,8 @@
 extern "C" {
 #endif
 
-typedef void (*bm_queue_status_sender_t)(uint8_t kind, uint16_t queue_count);
+/* Returns true when the status reached the mesh.  Failed sends are retried. */
+typedef bool (*bm_queue_status_sender_t)(uint8_t kind, uint16_t queue_count);
 
 typedef struct {
     uint16_t count;

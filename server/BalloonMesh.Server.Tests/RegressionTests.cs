@@ -183,14 +183,58 @@ public sealed class RegressionTests
     {
         var registry = new GatewayRegistry(new RecordingMonitorEvents());
         var generation = registry.AttachWebSocket("gw-test", null, "0.1.0",
-            provisioned: false, spoolPending: 0);
+            provisioned: false, spoolPending: 0, new CancellationTokenSource());
         var command = new DownlinkCommand(0xC010, 1, [1], 7);
 
         Assert.Equal(0, registry.Broadcast(command));
 
         await registry.DetachWebSocketAsync("gw-test", generation);
-        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0);
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new CancellationTokenSource());
         Assert.Equal(1, registry.Broadcast(command));
+    }
+
+    [Fact]
+    public async Task DetachedWebSocketGatewayIsNotTreatedAsAnHttpGateway()
+    {
+        var registry = new GatewayRegistry(new RecordingMonitorEvents());
+        var generation = registry.AttachWebSocket("gw-test", null, "0.1.0",
+            provisioned: true, spoolPending: 0, new CancellationTokenSource());
+        var command = new DownlinkCommand(0xC010, 1, [1], 7);
+        Assert.Equal(1, registry.Broadcast(command));
+
+        await registry.DetachWebSocketAsync("gw-test", generation);
+
+        Assert.Equal(0, registry.Broadcast(command));
+    }
+
+    [Fact]
+    public void ExplicitlyUnreadyHttpGatewayIsNotCounted()
+    {
+        var registry = new GatewayRegistry(new RecordingMonitorEvents());
+        var command = new DownlinkCommand(0xC010, 1, [1], 7);
+        registry.Touch("gw-test");
+        registry.UpdateRuntimeState("gw-test", provisioned: false, spoolPending: 0);
+        Assert.Equal(0, registry.Broadcast(command));
+
+        registry.UpdateRuntimeState("gw-test", provisioned: true, spoolPending: 0);
+        Assert.Equal(1, registry.Broadcast(command));
+    }
+
+    [Fact]
+    public void StaleWebSocketStateUpdateIsIgnored()
+    {
+        var registry = new GatewayRegistry(new RecordingMonitorEvents());
+        var oldGeneration = registry.AttachWebSocket("gw-test", null, "0.1.0",
+            provisioned: true, spoolPending: 0, new CancellationTokenSource());
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true,
+            spoolPending: 0, new CancellationTokenSource());
+
+        registry.UpdateRuntimeState("gw-test", provisioned: false, spoolPending: 9,
+            oldGeneration);
+
+        var gateway = Assert.Single(registry.Snapshot());
+        Assert.True(gateway.Provisioned);
+        Assert.Equal(0, gateway.SpoolPending);
     }
 
     [Fact]
@@ -198,8 +242,8 @@ public sealed class RegressionTests
     {
         var registry = new GatewayRegistry(new RecordingMonitorEvents());
         var oldGeneration = registry.AttachWebSocket("gw-test", null, "0.1.0",
-            provisioned: true, spoolPending: 0);
-        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0);
+            provisioned: true, spoolPending: 0, new CancellationTokenSource());
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new CancellationTokenSource());
 
         await registry.DetachWebSocketAsync("gw-test", oldGeneration);
 

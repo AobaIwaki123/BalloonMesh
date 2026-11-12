@@ -142,14 +142,31 @@ public sealed class FtmAggregator
         }
     }
 
-    public Task<int> ProcessDueAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    public async Task<int> ProcessDueAsync(DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
         List<PendingCompute>? due;
         lock (_gate)
         {
             due = TickLocked(now);
         }
-        return due is null ? Task.FromResult(0) : ComputeAsync(due, cancellationToken);
+        if (due is null)
+        {
+            return 0;
+        }
+        try
+        {
+            return await ComputeAsync(due, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleanup must happen even if the anchor query or an early item
+            // throws before the per-item final handler runs.
+            foreach (var item in due.Where(item => item.IsFinal))
+            {
+                _neighbors.Remove(item.Key.Source, item.Key.Batch);
+            }
+        }
     }
 
     private List<PendingCompute>? TickLocked(DateTimeOffset now)
@@ -299,13 +316,6 @@ public sealed class FtmAggregator
                 // closed batches cannot be recomputed, so only log here.
                 _logger.LogError(exception, "position computation failed for {Source:X4}/{Batch}",
                     item.Key.Source, item.Key.Batch);
-            }
-            finally
-            {
-                if (item.IsFinal)
-                {
-                    _neighbors.Remove(item.Key.Source, item.Key.Batch);
-                }
             }
         }
         return computed;

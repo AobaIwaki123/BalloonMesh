@@ -15,6 +15,9 @@ uint16_t bm_gateway_spool_count(void);
 bool bm_gateway_spool_peek(uint16_t index, bm_gateway_event_t *out);
 bool bm_gateway_spool_peek_seq(uint16_t index, bm_gateway_event_t *out,
                                uint32_t *sequence);
+/* Consistent copy of up to max queued events (and their sequences). */
+uint16_t bm_gateway_spool_snapshot(bm_gateway_event_t *events,
+                                   uint32_t *sequences, uint16_t max);
 /* Drops every event up to and including the uploaded sequence.  Unlike a
  * count-based drop this cannot delete events that arrived while the upload
  * was in flight (which may have evicted the original head). */

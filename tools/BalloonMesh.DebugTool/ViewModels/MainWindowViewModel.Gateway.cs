@@ -266,7 +266,8 @@ public partial class MainWindowViewModel
         {
             // A callback queued before Stop/Start belongs to the old emulator
             // and must not overwrite the current status.
-            if (!ReferenceEquals(_emulator, emulator))
+            if (!ReferenceEquals(_emulator, emulator) ||
+                (state.Connected && !emulator.IsRunning))
             {
                 return;
             }

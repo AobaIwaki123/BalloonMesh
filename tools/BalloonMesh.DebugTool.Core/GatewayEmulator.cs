@@ -184,6 +184,14 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                     }
                 }
 
+                lock (_gate)
+                {
+                    if (!_loopAlive || generation != _runGeneration)
+                    {
+                        throw new WebSocketException(
+                            "The gateway disconnected before the connection was ready.");
+                    }
+                }
                 RaiseConnection(true,
                     $"{TransportName(_options.Transport)} connected as {_options.GatewayId}");
             }
