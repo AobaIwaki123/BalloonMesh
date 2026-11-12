@@ -208,8 +208,14 @@ static esp_ble_mesh_model_t s_root_models[] = {
  * esp_ble_mesh_client_t and returns -EINVAL ("Invalid client user data")
  * when it is NULL, so a plain send-only vendor model cannot transmit. */
 static esp_ble_mesh_client_t s_telemetry_client;
+/* esp_ble_mesh_client_model_init() asserts on a NULL op table, and
+ * esp_ble_mesh_init() rejects a vendor model whose first op is not a 3-byte
+ * vendor opcode (btc_ble_mesh_prov.c: -EINVAL, init never completes), so an
+ * OP_END-only table leaves the stack uninitialised.  List one real opcode; the
+ * model is used to send only. */
 static esp_ble_mesh_model_op_t s_telemetry_client_ops[] = {
-    ESP_BLE_MESH_MODEL_OP_END, /* send-only: queue status, FTM, neighbour, time */
+    ESP_BLE_MESH_MODEL_OP(BM_VENDOR_OPCODE(BM_OP_QUEUE_STATUS), 3),
+    ESP_BLE_MESH_MODEL_OP_END,
 };
 
 static esp_ble_mesh_model_t s_vendor_models[] = {
