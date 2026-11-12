@@ -398,7 +398,10 @@ public sealed class LedDispatchService
                 }
             }
             SentTicks.RemoveAll(tick => tick + 300 <= nowTick); // 3 s grace
-            return Math.Clamp(Math.Max(ReportedCount, SentTicks.Count), 0, HardQueueDepth);
+            // Executed ticks are kept briefly so the decay above can see them,
+            // but they are no longer part of the device's future queue.
+            var pending = SentTicks.Count(tick => tick > nowTick);
+            return Math.Clamp(Math.Max(ReportedCount, pending), 0, HardQueueDepth);
         }
     }
 
