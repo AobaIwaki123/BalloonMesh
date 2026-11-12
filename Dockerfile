@@ -5,15 +5,14 @@ RUN apt-get update && apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 
-# ソリューションとプロジェクトファイルをコピーして依存関係を復元
-COPY BalloonMesh.sln ./
+# 必要なプロジェクトファイルをコピーして依存関係を復元
 COPY server/BalloonMesh.Server.csproj server/
-COPY server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj server/BalloonMesh.Server.Tests/
+COPY server/BalloonMesh.Protocol/BalloonMesh.Protocol.csproj server/BalloonMesh.Protocol/
 COPY third_party/SvelteSharp/SvelteSharp.Core/SvelteSharp.Core.csproj third_party/SvelteSharp/SvelteSharp.Core/
 COPY third_party/SvelteSharp/SvelteSharp.Jint/SvelteSharp.Jint.csproj third_party/SvelteSharp/SvelteSharp.Jint/
 COPY third_party/SvelteSharp/SvelteSharp.Build/SvelteSharp.Build.csproj third_party/SvelteSharp/SvelteSharp.Build/
 
-RUN dotnet restore BalloonMesh.sln
+RUN dotnet restore server/BalloonMesh.Server.csproj
 
 # ソースコードをコピー
 COPY server/ server/

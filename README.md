@@ -72,7 +72,36 @@ docker compose up -d --build
 
 ---
 
-### 1. PostgreSQL（ローカル起動の場合）
+### 1. クラウド / AWS Lightsail へのデプロイ
+
+常時接続 WebSocket (`/ws/gateway`, `/hubs/monitor`) や測位バッチ集約ワーカーが稼働するため、Vercel 等のサーバーレスではなく常時起動 VPS（Amazon Lightsail 等）でのホスティングを推奨します。手元から 1 コマンドで作成・更新・破棄ができるスクリプトを用意しています。
+
+#### 初回作成 ＆ 自動デプロイ
+AWS CLI が設定された環境で以下を実行すると、Lightsail インスタンス作成・ポート開放・Docker 起動まで全自動で行われます：
+
+```bash
+# ./scripts/lightsail-init.sh [INSTANCE_NAME] [SSH_KEY_PATH] [BUNDLE_ID]
+./scripts/lightsail-init.sh balloonmesh-server ~/.ssh/your-key.pem small_3_0
+```
+*(プランは 2GB RAM の `small_3_0` ($12/月) または 1GB RAM の `micro_3_0` ($7/月) が推奨です)*
+
+#### 更新の再デプロイ
+手元の変更差分を転送し、コンテナを再ビルド・即時反映します：
+
+```bash
+./scripts/lightsail-deploy.sh <LIGHTSAIL_IP> ~/.ssh/your-key.pem
+```
+
+#### インスタンスの破棄（課金停止）
+検証完了後、1 コマンドでインスタンス・ディスク・キーペアを完全削除して課金を停止できます：
+
+```bash
+./scripts/lightsail-destroy.sh balloonmesh-server
+```
+
+---
+
+### 2. ローカル直接起動 (dotnet run) の場合
 
 ローカル PostgreSQL 16 を想定しています。開発用ロールと DB を作成します。
 
