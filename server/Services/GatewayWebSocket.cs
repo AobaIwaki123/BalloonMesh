@@ -24,6 +24,7 @@ public static class GatewayWebSocket
         long connectionGeneration = 0;
         CancellationTokenSource? connectionLifetime = null;
         Task? previousWriter = null;
+        TaskCompletionSource<bool>? writerCompletion = null;
         try
         {
             var hello = await ReceiveTextAsync(socket, linked.Token);
@@ -68,6 +69,7 @@ public static class GatewayWebSocket
                         connectionLifetime);
                     connectionGeneration = attached.Generation;
                     previousWriter = attached.PreviousWriter;
+                    writerCompletion = attached.WriterCompletion;
                 }
             }
             catch (JsonException exception)
@@ -99,7 +101,6 @@ public static class GatewayWebSocket
             var client = registry.GetOrRegister(gatewayId);
             var writer = WriteCommandsAsync(socket, client, connectionToken, logger,
                 connectionGeneration, previousWriter);
-            client.WebSocketWriter = writer;
             try
             {
                 while (socket.State == WebSocketState.Open &&
@@ -161,6 +162,7 @@ public static class GatewayWebSocket
                 {
                     // expected on disconnect
                 }
+                writerCompletion?.TrySetResult(true);
             }
         }
         catch (OperationCanceledException)
@@ -173,6 +175,7 @@ public static class GatewayWebSocket
         }
         finally
         {
+            writerCompletion?.TrySetResult(true);
             // Detach even when the hello ack send failed before the command
             // writer loop started, otherwise the registry keeps a dead
             // WebSocket as a reachable gateway.
@@ -220,9 +223,13 @@ public static class GatewayWebSocket
                         "Previous WebSocket writer for {Gateway} did not stop in time",
                         client.Id);
                 }
-                catch (OperationCanceledException)
+                catch (Exception exception)
                 {
-                    // Expected while the old connection is being retired.
+                    // A faulty predecessor must not stop the new writer from
+                    // draining the requeue.
+                    logger.LogDebug(exception,
+                        "Previous WebSocket writer for {Gateway} ended abnormally",
+                        client.Id);
                 }
             }
             while (!cancellationToken.IsCancellationRequested)
@@ -247,7 +254,20 @@ public static class GatewayWebSocket
                     ttl = command.Ttl
                 };
                 var json = JsonSerializer.SerializeToUtf8Bytes(body, Json);
-                await socket.SendAsync(json, WebSocketMessageType.Text, true, cancellationToken);
+                try
+                {
+                    await socket.SendAsync(json, WebSocketMessageType.Text, true,
+                        cancellationToken);
+                }
+                catch (Exception exception) when (exception is OperationCanceledException or
+                                                  WebSocketException or ObjectDisposedException or
+                                                  InvalidOperationException)
+                {
+                    // The command was removed from the channel but never
+                    // written; preserve it for the next connection.
+                    client.Requeue.Enqueue(command);
+                    throw;
+                }
             }
         }
         catch (OperationCanceledException)
@@ -255,6 +275,11 @@ public static class GatewayWebSocket
             // expected on disconnect
         }
         catch (WebSocketException exception)
+        {
+            logger.LogInformation(exception, "Gateway command writer stopped");
+        }
+        catch (Exception exception) when (exception is ObjectDisposedException or
+                                          InvalidOperationException)
         {
             logger.LogInformation(exception, "Gateway command writer stopped");
         }

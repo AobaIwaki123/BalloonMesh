@@ -74,14 +74,16 @@ public sealed class GatewayRegistry
         return client;
     }
 
-    public (long Generation, Task? PreviousWriter) AttachWebSocket(
-        string id, string? remote, string? firmware,
-        bool provisioned, int spoolPending, CancellationTokenSource lifetime)
+    public (long Generation, Task? PreviousWriter, TaskCompletionSource<bool> WriterCompletion)
+        AttachWebSocket(string id, string? remote, string? firmware,
+            bool provisioned, int spoolPending, CancellationTokenSource lifetime)
     {
         var client = GetOrRegister(id, firmware);
         long generation;
         CancellationTokenSource? previous;
         Task? previousWriter;
+        var writerCompletion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         lock (client.ConnectionGate)
         {
             // Bump first: the old handler's detach/state callbacks must see a
@@ -90,7 +92,10 @@ public sealed class GatewayRegistry
             previous = client.WebSocketLifetime;
             client.WebSocketLifetime = lifetime;
             previousWriter = client.WebSocketWriter;
-            client.WebSocketWriter = null;
+            // Publish a completion for this writer before the handler starts
+            // it, so a reconnect in the startup window still has something to
+            // await.
+            client.WebSocketWriter = writerCompletion.Task;
             client.Provisioned = provisioned;
             client.ProvisionedReported = true;
             client.SpoolPending = spoolPending;
@@ -112,7 +117,7 @@ public sealed class GatewayRegistry
             }
         }
         _ = NotifyChangedAsync();
-        return (generation, previousWriter);
+        return (generation, previousWriter, writerCompletion);
     }
 
     public async Task DetachWebSocketAsync(string id, long generation)
