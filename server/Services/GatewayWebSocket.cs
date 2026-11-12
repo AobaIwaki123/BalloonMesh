@@ -21,6 +21,7 @@ public static class GatewayWebSocket
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken, context.RequestAborted);
         string? gatewayId = null;
+        long connectionGeneration = 0;
         try
         {
             var hello = await ReceiveTextAsync(socket, linked.Token);
@@ -55,12 +56,12 @@ public static class GatewayWebSocket
                 }
                 if (!string.IsNullOrWhiteSpace(gatewayId))
                 {
-                    registry.AttachWebSocket(gatewayId, remote ?? context.Connection.RemoteIpAddress?.ToString(), firmware);
-                    if (registry.GetOrRegister(gatewayId) is { } attachedClient)
-                    {
-                        attachedClient.Provisioned = provisioned;
-                        attachedClient.SpoolPending = spoolPending;
-                    }
+                    connectionGeneration = registry.AttachWebSocket(
+                        gatewayId,
+                        remote ?? context.Connection.RemoteIpAddress?.ToString(),
+                        firmware,
+                        provisioned,
+                        spoolPending);
                 }
             }
             catch (JsonException exception)
@@ -77,6 +78,16 @@ public static class GatewayWebSocket
                     "hello with gatewayId required", linked.Token);
                 return;
             }
+
+            // Explicit acknowledgement so a client can distinguish "connected
+            // and accepted" from "connected, then rejected after hello".  Real
+            // gateways ignore unknown message types.
+            var ack = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                type = "helloAck",
+                gatewayId
+            }, Json);
+            await socket.SendAsync(ack, WebSocketMessageType.Text, true, linked.Token);
 
             var client = registry.GetOrRegister(gatewayId);
             var writer = WriteCommandsAsync(socket, client, linked.Token, logger);
@@ -121,7 +132,7 @@ public static class GatewayWebSocket
                 {
                     // expected on disconnect
                 }
-                await registry.DetachWebSocketAsync(gatewayId);
+                await registry.DetachWebSocketAsync(gatewayId, connectionGeneration);
             }
         }
         catch (OperationCanceledException)

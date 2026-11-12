@@ -245,6 +245,10 @@ static void test_queue_snapshot_roundtrip(void) {
 }
 
 static void test_queue_monitor_hysteresis(void) {
+    bm_queue_monitor_t restored_near_full = {0};
+    TEST_ASSERT_EQUAL_INT(1, bm_queue_monitor_update(&restored_near_full, 401));
+    TEST_ASSERT_EQUAL_INT(0, bm_queue_monitor_update(&restored_near_full, 400));
+
     bm_queue_monitor_t monitor = {0};
     TEST_ASSERT_EQUAL_INT(0, bm_queue_monitor_update(&monitor, 300));
     TEST_ASSERT_EQUAL_INT(1, bm_queue_monitor_update(&monitor, 401));

@@ -45,6 +45,8 @@ private:
     WiFiClientSecure secure_;
 };
 
+#if !defined(BM_GATEWAY_USE_WEBSOCKET) || !BM_GATEWAY_USE_WEBSOCKET
+
 static void hex_encode(const uint8_t *data, size_t length, char *out, size_t out_size) {
     static const char digits[] = "0123456789ABCDEF";
     size_t position = 0;
@@ -82,8 +84,6 @@ static bool server_available(void) {
     return WiFi.status() == WL_CONNECTED;
 }
 
-#if !defined(BM_GATEWAY_USE_WEBSOCKET) || !BM_GATEWAY_USE_WEBSOCKET
-
 static void upload_events_task(void *argument) {
     (void)argument;
     GatewayHttpClient transport;
@@ -94,9 +94,11 @@ static void upload_events_task(void *argument) {
         }
         bm_gateway_event_t events[12];
         uint16_t count = 0;
+        uint32_t last_sequence = 0;
         uint16_t available = bm_gateway_spool_count();
         while (count < 12 && count < available &&
-               bm_gateway_spool_peek((uint16_t)count, &events[count])) {
+               bm_gateway_spool_peek_seq((uint16_t)count, &events[count],
+                                         &last_sequence)) {
             count++;
         }
         if (count == 0) {
@@ -114,7 +116,7 @@ static void upload_events_task(void *argument) {
                                "{\"gatewayId\":\"%s\",\"firmware\":\"%s\","
                                "\"provisioned\":%s,\"spoolPending\":%u,\"events\":[",
                                BM_GATEWAY_ID, BM_FIRMWARE_VERSION,
-                               bm_gateway_mesh_is_provisioned() ? "true" : "false",
+                               bm_gateway_mesh_is_ready() ? "true" : "false",
                                (unsigned)bm_gateway_spool_count());
         bool body_ok = written > 0 && (size_t)written < capacity;
         for (uint16_t i = 0; body_ok && i < count; ++i) {
@@ -161,7 +163,7 @@ static void upload_events_task(void *argument) {
             }
             int code = http.POST((uint8_t *)body, strlen(body));
             if (code >= 200 && code < 300) {
-                bm_gateway_spool_drop(count);
+                bm_gateway_spool_drop_through(last_sequence);
             } else {
                 ESP_LOGW(TAG, "upload failed HTTP %d; retaining %u events",
                          code, (unsigned)count);
@@ -180,7 +182,7 @@ static void poll_commands_task(void *argument) {
     (void)argument;
     GatewayHttpClient transport;
     for (;;) {
-        if (!server_available() || !bm_gateway_mesh_is_provisioned()) {
+        if (!server_available() || !bm_gateway_mesh_is_ready()) {
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }

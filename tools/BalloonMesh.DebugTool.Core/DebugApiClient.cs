@@ -162,7 +162,7 @@ public sealed class DebugApiClient : IDisposable
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw CreateException(response.StatusCode, text);
+            throw CreateException(response.StatusCode, text, gatewayRequest: true);
         }
         return Deserialize<GatewayCommandsResponse>(text).Commands;
     }
@@ -248,7 +248,7 @@ public sealed class DebugApiClient : IDisposable
         var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw CreateException(response.StatusCode, text);
+            throw CreateException(response.StatusCode, text, gatewayRequest: gatewayRequest);
         }
         return Deserialize<T>(text);
     }
@@ -293,17 +293,25 @@ public sealed class DebugApiClient : IDisposable
     }
 
     private static DebugApiException CreateException(HttpStatusCode status, string body,
-        string? hint = null)
+        string? hint = null, bool gatewayRequest = false)
     {
         var detail = ExtractError(body);
         var suffix = string.IsNullOrWhiteSpace(detail) ? string.Empty : $": {detail}";
-        var guidance = hint ?? status switch
-        {
-            HttpStatusCode.Unauthorized => "Sign in with Mock login or supply a session cookie.",
-            HttpStatusCode.Forbidden => "The signed-in user does not have permission for this operation.",
-            HttpStatusCode.NotFound => "The endpoint was not found. Check the server URL.",
-            _ => null
-        };
+        var guidance = hint ?? (gatewayRequest
+            ? status switch
+            {
+                HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                    "Check the Gateway token (X-Gateway-Token) in the Gateway simulator tab.",
+                HttpStatusCode.NotFound => "The gateway endpoint was not found. Check the server URL.",
+                _ => null
+            }
+            : status switch
+            {
+                HttpStatusCode.Unauthorized => "Sign in with Mock login or supply a session cookie.",
+                HttpStatusCode.Forbidden => "The signed-in user does not have permission for this operation.",
+                HttpStatusCode.NotFound => "The endpoint was not found. Check the server URL.",
+                _ => null
+            });
         var message = $"HTTP {(int)status} {status}{suffix}";
         if (!string.IsNullOrWhiteSpace(guidance))
         {

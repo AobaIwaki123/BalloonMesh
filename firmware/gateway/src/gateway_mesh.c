@@ -111,18 +111,18 @@ static void schedule_bind_retry(void) {
         return;
     }
     state_lock();
-    if (s_bind_retry_attempts >= BM_BIND_RETRY_MAX_ATTEMPTS) {
-        state_unlock();
-        ESP_LOGE(TAG, "vendor model binding failed after %u attempts",
-                 BM_BIND_RETRY_MAX_ATTEMPTS);
-        return;
-    }
     uint32_t delay_ms = s_bind_retry_delay_ms;
     if (delay_ms == 0) {
         delay_ms = 1000;
     }
-    s_bind_retry_delay_ms = delay_ms < 30000 ? delay_ms * 2 : 30000;
-    s_bind_retry_attempts++;
+    if (s_bind_retry_attempts >= BM_BIND_RETRY_MAX_ATTEMPTS) {
+        /* Keep a slow background retry: a provisioner may add the AppKey long
+         * after boot, and giving up would leave the node permanently deaf. */
+        delay_ms = 30000;
+    } else {
+        s_bind_retry_delay_ms = delay_ms < 30000 ? delay_ms * 2 : 30000;
+        s_bind_retry_attempts++;
+    }
     state_unlock();
     (void)esp_timer_stop(s_bind_retry_timer);
     esp_err_t err = esp_timer_start_once(s_bind_retry_timer,
@@ -262,6 +262,9 @@ static void bind_vendor_models(uint16_t addr, bool reset_backoff) {
         state_lock();
         xEventGroupClearBits(s_state_events, BM_MESH_STATE_BINDING);
         state_unlock();
+        /* The AppKey Add callback normally follows, but schedule a retry in
+         * case this path is reached after a missed/racy callback. */
+        schedule_bind_retry();
         return;
     }
 
@@ -566,6 +569,10 @@ void bm_gateway_mesh_init(void) {
 
 bool bm_gateway_mesh_is_provisioned(void) {
     return mesh_is_provisioned();
+}
+
+bool bm_gateway_mesh_is_ready(void) {
+    return mesh_is_provisioned() && vendor_models_ready();
 }
 
 uint16_t bm_gateway_mesh_primary_addr(void) {

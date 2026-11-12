@@ -32,9 +32,8 @@
 #define BM_GROUP_TIME BM_GROUP_BALLOON
 #define BM_GROUP_LED_ALL BM_GROUP_BALLOON
 
-/* Provisioning identity (PB-ADV/PB-GATT).  Replace per device. */
-#define BM_PROV_UUID { 0xB1, 0xA1, 0x10, 0x00, 0x00, 0x01, 0x11, 0x22, \
-                       0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA }
+/* Provisioning identity (PB-ADV/PB-GATT) is generated per device from the
+ * Bluetooth MAC by bm_device_uuid(); do not hard-code a shared UUID here. */
 
 /* Anchor SoftAP and Protocol A. */
 #define BM_ANCHOR_SSID_PREFIX "BM-ANCHOR-"
@@ -54,6 +53,7 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
     { 1, "BM-ANCHOR-1" },
     { 2, "BM-ANCHOR-2" },
     { 3, "BM-ANCHOR-3" },
+    { 4, "BM-ANCHOR-4" },
 };
 
 /* LED PWM pins (Seeed XIAO ESP32C3: D0=GPIO2, D1=GPIO3, D2=GPIO4). */

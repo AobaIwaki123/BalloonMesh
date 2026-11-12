@@ -82,6 +82,7 @@
 - HTTP downlink: `GET /api/gateway/{id}/commands?waitMs=...`
 - WebSocket: `/ws/gateway`
   - hello: `{"type":"hello","gatewayId":"gw-01","firmware":"0.1.0","token":"...","provisioned":true,"spoolPending":0}`
+  - hello ack: `{"type":"helloAck","gatewayId":"gw-01"}`（トークン拒否時は hello 直後に close。デバッグツールは ack を待って接続成否を判定）
   - uplink: `{"type":"mesh","src":257,"dst":49169,"opcode":...,"payload":"...HEX...","rssi":-55,"ttl":7}`（`49169` = `0xC011`、ゲートウェイ向けテレメトリグループ）
   - downlink: `{"type":"mesh","dst":...,"opcode":...,"payload":"...HEX...","ttl":7}`
 
@@ -95,8 +96,10 @@ payload は hex。ACK は実装していません。Gateway は重複排除・�
 - `QUEUE_STATUS` の実件数と送信済み推定件数の大きい方を有効件数とする
 - 有効件数が 350 未満のバルーンにだけ予約を送る
 - Gateway が 0 台のときは pending のまま保持し、Gateway 接続後に送る
-- グループ宛は 1 メッセージを group DST に送り、対象バルーン全員の推定件数を加算
+- 全台向けは 1 メッセージを `0xC010` に送り、対象バルーン全員の推定件数を加算
+- ゾーン / グループ宛の LED 命令は現在のサーバ API では受け付けない（全台またはユニキャストを使用）
 - 実行時刻を過ぎた pending は破棄
+- キャンセル / RESET が Gateway に届いたら、未送信の pending も同じ tick / cutoff で取り消す
 
 ## 9. 近隣探索の詳細
 
@@ -118,6 +121,7 @@ payload は hex。ACK は実装していません。Gateway は重複排除・�
 - 3 局以上: 重み付き線形最小二乗
 - 1 局: 前回位置からの方向を保ち、距離だけ更新（前回位置がない場合は解を出さない）
 - 近隣 RSSI: ログ距離モデルで距離に変換し、重み 0.15 の補助制約
+- FTM_REPORT が 1 件も届かない場合でも、NEIGHBOR_REPORT がバッチを開いて近隣のみで測位を試みる
 - 前回位置がない 2 局ケース: 候補 1 を選択
 - 局所平面は equirectangular 近似（数百 m 規模）
 

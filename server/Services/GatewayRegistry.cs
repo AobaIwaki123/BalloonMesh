@@ -22,6 +22,7 @@ public sealed class GatewayClient
     public string Id { get; }
     public Channel<DownlinkCommand> Commands { get; }
     public bool WebSocketConnected { get; set; }
+    public long WebSocketGeneration { get; set; }
     public string? Remote { get; set; }
     public string? Firmware { get; set; }
     public bool Provisioned { get; set; }
@@ -58,23 +59,50 @@ public sealed class GatewayRegistry
         return client;
     }
 
-    public bool AttachWebSocket(string id, string? remote, string? firmware)
+    public long AttachWebSocket(string id, string? remote, string? firmware,
+        bool provisioned, int spoolPending)
     {
         var client = GetOrRegister(id, firmware);
+        client.Provisioned = provisioned;
+        client.SpoolPending = spoolPending;
         client.WebSocketConnected = true;
         client.Remote = remote;
+        client.WebSocketGeneration++;
         _ = NotifyChangedAsync();
-        return true;
+        return client.WebSocketGeneration;
     }
 
-    public async Task DetachWebSocketAsync(string id)
+    public async Task DetachWebSocketAsync(string id, long generation)
     {
-        if (_clients.TryGetValue(id, out var client))
+        if (_clients.TryGetValue(id, out var client) &&
+            client.WebSocketGeneration == generation)
         {
+            // Only the connection that is still current may clear the flag: a
+            // reconnect can attach before the old handler's finally block runs.
             client.WebSocketConnected = false;
             client.LastSeen = DateTimeOffset.UtcNow;
         }
         await NotifyChangedAsync();
+    }
+
+    public void UpdateRuntimeState(string id, bool? provisioned, int? spoolPending)
+    {
+        var client = GetOrRegister(id);
+        var changed = false;
+        if (provisioned is { } value && client.Provisioned != value)
+        {
+            client.Provisioned = value;
+            changed = true;
+        }
+        if (spoolPending is { } spool && client.SpoolPending != spool)
+        {
+            client.SpoolPending = spool;
+            changed = true;
+        }
+        if (changed)
+        {
+            _ = NotifyChangedAsync();
+        }
     }
 
     public void Touch(string id, string? firmware = null)
@@ -96,7 +124,11 @@ public sealed class GatewayRegistry
             // WebSocket-connected clients count as active receivers.
             var cutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
             var clients = _clients.Values
-                .Where(client => client.WebSocketConnected || client.LastSeen >= cutoff)
+                .Where(client => client.WebSocketConnected
+                    // A connected WebSocket gateway that has not finished its
+                    // model/AppKey binding would silently drop downlinks.
+                    ? client.Provisioned
+                    : client.LastSeen >= cutoff)
                 .ToArray();
             if (clients.Any(client => client.PendingCommands >= GatewayQueueCapacity))
             {

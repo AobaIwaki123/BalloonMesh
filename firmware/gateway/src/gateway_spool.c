@@ -20,6 +20,8 @@ static const char *TAG = "gateway-spool";
 typedef struct {
     SemaphoreHandle_t lock;
     bm_gateway_event_t events[BM_SPOOL_CAPACITY];
+    uint32_t sequences[BM_SPOOL_CAPACITY];
+    uint32_t next_sequence;
     uint16_t head;
     uint16_t count;
     bool dirty;
@@ -99,9 +101,11 @@ static void load_from_nvs(void) {
             for (uint16_t i = 0; i < count; ++i) {
                 decode_event(&buffer[BM_SPOOL_HEADER + (size_t)i * BM_SPOOL_EVENT_BYTES],
                              &s_spool.events[i]);
+                s_spool.sequences[i] = i;
             }
             s_spool.head = 0;
             s_spool.count = count;
+            s_spool.next_sequence = count;
             ESP_LOGI(TAG, "restored %u pending events", count);
         }
     }
@@ -197,6 +201,7 @@ void bm_gateway_spool_add(const bm_gateway_event_t *event) {
     }
     uint16_t tail = (uint16_t)((s_spool.head + s_spool.count) % BM_SPOOL_CAPACITY);
     s_spool.events[tail] = *event;
+    s_spool.sequences[tail] = s_spool.next_sequence++;
     s_spool.count++;
     s_spool.dirty = true;
     xSemaphoreGive(s_spool.lock);
@@ -215,18 +220,43 @@ uint16_t bm_gateway_spool_count(void) {
 }
 
 bool bm_gateway_spool_peek(uint16_t index, bm_gateway_event_t *out) {
+    return bm_gateway_spool_peek_seq(index, out, NULL);
+}
+
+bool bm_gateway_spool_peek_seq(uint16_t index, bm_gateway_event_t *out,
+                               uint32_t *sequence) {
     if (!s_spool.ready || out == NULL) {
         return false;
     }
     bool ok = false;
     if (xSemaphoreTake(s_spool.lock, pdMS_TO_TICKS(20)) == pdTRUE) {
         if (index < s_spool.count) {
-            *out = s_spool.events[(s_spool.head + index) % BM_SPOOL_CAPACITY];
+            uint16_t slot = (uint16_t)((s_spool.head + index) % BM_SPOOL_CAPACITY);
+            *out = s_spool.events[slot];
+            if (sequence != NULL) {
+                *sequence = s_spool.sequences[slot];
+            }
             ok = true;
         }
         xSemaphoreGive(s_spool.lock);
     }
     return ok;
+}
+
+void bm_gateway_spool_drop_through(uint32_t sequence) {
+    if (!s_spool.ready) {
+        return;
+    }
+    if (xSemaphoreTake(s_spool.lock, pdMS_TO_TICKS(20)) != pdTRUE) {
+        return;
+    }
+    while (s_spool.count > 0 &&
+           (int32_t)(s_spool.sequences[s_spool.head] - sequence) <= 0) {
+        s_spool.head = (uint16_t)((s_spool.head + 1u) % BM_SPOOL_CAPACITY);
+        s_spool.count--;
+    }
+    s_spool.dirty = true;
+    xSemaphoreGive(s_spool.lock);
 }
 
 void bm_gateway_spool_drop(uint16_t count) {

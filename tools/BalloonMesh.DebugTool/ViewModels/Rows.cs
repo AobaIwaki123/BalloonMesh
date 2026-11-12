@@ -60,8 +60,10 @@ public sealed class ShowStepRowViewModel
     public long Id => Info.Id;
     public string Name => Info.Name;
     public string Target => $"{Info.TargetKind}:{Info.Target}";
-    public string ExecuteAtText => Info.ExecuteAt.ToLocalTime()
-        .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    // UTC with milliseconds so the value can be copied into the Commands tab
+    // (which parses it as UTC) and used for an exact LED_CANCEL.
+    public string ExecuteAtText => Info.ExecuteAt.ToUniversalTime()
+        .ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
     public string ColorHex => $"#{Info.R:X2}{Info.G:X2}{Info.B:X2}";
     public IBrush ColorBrush { get; }
     public string Status => Info.Status;

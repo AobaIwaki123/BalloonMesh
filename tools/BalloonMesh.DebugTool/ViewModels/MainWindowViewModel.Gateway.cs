@@ -8,6 +8,10 @@ namespace BalloonMesh.DebugTool.ViewModels;
 public partial class MainWindowViewModel
 {
     private GatewayEmulator? _emulator;
+    private Action<string>? _emulatorLogHandler;
+    private Action<GatewayConnectionState>? _emulatorConnectionHandler;
+    private Action<ReceivedGatewayCommand>? _emulatorCommandHandler;
+    private Action<SentGatewayEvent>? _emulatorEventHandler;
 
     public IReadOnlyList<string> GatewayTransports { get; } = ["WebSocket", "HTTP"];
 
@@ -110,10 +114,7 @@ public partial class MainWindowViewModel
                 "The gateway token will be sent over plain HTTP to a non-loopback host. Use HTTPS/WSS.");
         }
         var emulator = new GatewayEmulator(options);
-        emulator.Log += OnEmulatorLog;
-        emulator.ConnectionChanged += OnEmulatorConnectionChanged;
-        emulator.CommandReceived += OnEmulatorCommandReceived;
-        emulator.EventSent += OnEmulatorEventSent;
+        AttachEmulator(emulator);
         try
         {
             await emulator.StartAsync().ConfigureAwait(true);
@@ -123,10 +124,12 @@ public partial class MainWindowViewModel
             AddLog("info", EmulatorStatus);
             SaveSettings();
         }
-        catch
+        catch (Exception exception)
         {
             DetachEmulator(emulator);
             emulator.Dispose();
+            EmulatorRunning = false;
+            EmulatorStatus = $"Start failed: {exception.Message}";
             throw;
         }
     });
@@ -137,6 +140,7 @@ public partial class MainWindowViewModel
         var emulator = _emulator;
         if (emulator is null)
         {
+            EmulatorRunning = false;
             EmulatorStatus = "Not running.";
             return;
         }
@@ -171,6 +175,13 @@ public partial class MainWindowViewModel
             messages.Add(BuildFtmMessage(distance, batch, anchor));
         }
         await emulator.SendEventsAsync(messages).ConfigureAwait(true);
+        // A batch id is closed after 30 s and ignored for another two minutes;
+        // advancing the field keeps repeated batch sends useful.
+        if (byte.TryParse(FtmBatchId, out var next))
+        {
+            FtmBatchId = ((next + 1) % 256).ToString();
+            SaveSettings();
+        }
     });
 
     [RelayCommand]
@@ -241,19 +252,33 @@ public partial class MainWindowViewModel
         return samples;
     }
 
-    private void OnEmulatorLog(string message) => AddLog("gateway", message);
-
-    private void OnEmulatorConnectionChanged(GatewayConnectionState state) =>
-        Dispatcher.UIThread.Post(() =>
+    private void AttachEmulator(GatewayEmulator emulator)
+    {
+        _emulatorLogHandler = message =>
         {
+            if (ReferenceEquals(_emulator, emulator))
+            {
+                AddLog("gateway", message);
+            }
+        };
+        _emulatorConnectionHandler = state => Dispatcher.UIThread.Post(() =>
+        {
+            // A callback queued before Stop/Start belongs to the old emulator
+            // and must not overwrite the current status.
+            if (!ReferenceEquals(_emulator, emulator))
+            {
+                return;
+            }
             EmulatorRunning = state.Connected;
             EmulatorStatus = state.Description;
             AddLog(state.Connected ? "info" : "warn", state.Description);
         });
-
-    private void OnEmulatorCommandReceived(ReceivedGatewayCommand received) =>
-        Dispatcher.UIThread.Post(() =>
+        _emulatorCommandHandler = received => Dispatcher.UIThread.Post(() =>
         {
+            if (!ReferenceEquals(_emulator, emulator))
+            {
+                return;
+            }
             ReceivedCommands.Add(new ReceivedCommandRowViewModel(received, OpenInProtocol));
             while (ReceivedCommands.Count > MaxReceivedCommands)
             {
@@ -264,21 +289,33 @@ public partial class MainWindowViewModel
             AddDecodedEntry(received.ReceivedAt, "RX", received.Transport,
                 received.Decoded, received.RawJson);
         });
-
-    private void OnEmulatorEventSent(SentGatewayEvent sent) =>
-        Dispatcher.UIThread.Post(() =>
+        _emulatorEventHandler = sent => Dispatcher.UIThread.Post(() =>
         {
+            if (!ReferenceEquals(_emulator, emulator))
+            {
+                return;
+            }
             AddLog("send",
                 $"TX {sent.Message.Src:X4}->{sent.Message.Dst:X4} " +
                 ProtocolInspector.FormatDecoded(sent.Decoded));
             AddDecodedEntry(sent.SentAt, "TX", sent.Transport, sent.Decoded, sent.RawJson);
         });
 
+        emulator.Log += _emulatorLogHandler;
+        emulator.ConnectionChanged += _emulatorConnectionHandler;
+        emulator.CommandReceived += _emulatorCommandHandler;
+        emulator.EventSent += _emulatorEventHandler;
+    }
+
     private void DetachEmulator(GatewayEmulator emulator)
     {
-        emulator.Log -= OnEmulatorLog;
-        emulator.ConnectionChanged -= OnEmulatorConnectionChanged;
-        emulator.CommandReceived -= OnEmulatorCommandReceived;
-        emulator.EventSent -= OnEmulatorEventSent;
+        if (_emulatorLogHandler is { } log) emulator.Log -= log;
+        if (_emulatorConnectionHandler is { } connection) emulator.ConnectionChanged -= connection;
+        if (_emulatorCommandHandler is { } command) emulator.CommandReceived -= command;
+        if (_emulatorEventHandler is { } sent) emulator.EventSent -= sent;
+        _emulatorLogHandler = null;
+        _emulatorConnectionHandler = null;
+        _emulatorCommandHandler = null;
+        _emulatorEventHandler = null;
     }
 }

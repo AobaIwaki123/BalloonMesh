@@ -83,7 +83,7 @@ static void send_hello(void) {
              "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
              "\"token\":\"%s\",\"provisioned\":%s,\"spoolPending\":%u}",
              BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
-             bm_gateway_mesh_is_provisioned() ? "true" : "false",
+             bm_gateway_mesh_is_ready() ? "true" : "false",
              (unsigned)bm_gateway_spool_count());
     esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
                                    pdMS_TO_TICKS(3000));
@@ -164,7 +164,8 @@ static void ws_sender_task(void *argument) {
             continue;
         }
         bm_gateway_event_t event;
-        if (!bm_gateway_spool_peek(0, &event)) {
+        uint32_t sequence = 0;
+        if (!bm_gateway_spool_peek_seq(0, &event, &sequence)) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
@@ -182,7 +183,7 @@ static void ws_sender_task(void *argument) {
             if (sent < 0) {
                 ESP_LOGW(TAG, "send failed; retaining event");
             } else {
-                bm_gateway_spool_drop(1);
+                bm_gateway_spool_drop_through(sequence);
             }
         }
     }

@@ -513,7 +513,7 @@ public sealed class DataStore
             command.CommandText = """
                 UPDATE balloons
                 SET initial_lat = @lat, initial_lon = @lon,
-                    lat = COALESCE(lat, @lat), lon = COALESCE(lon, @lon),
+                    lat = @lat, lon = @lon,
                     last_method = 'initial', updated_at = @updated
                 WHERE mesh_address = @addr;
                 """;

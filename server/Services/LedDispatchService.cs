@@ -124,31 +124,45 @@ public sealed class LedDispatchService
         }
     }
 
-    public void NoteCutoff(IEnumerable<ushort> addresses, ulong cutoffTick)
+    public IReadOnlyList<long> NoteCutoff(IEnumerable<ushort> addresses, ulong cutoffTick)
     {
+        var targets = addresses.ToHashSet();
+        var removed = new List<long>();
         lock (_gate)
         {
-            foreach (var address in addresses)
+            // A RESET that reached a gateway also applies to reservations that
+            // are still pending locally; dispatching them afterwards would
+            // resurrect commands the user already cancelled.
+            removed.AddRange(RemovePending(item =>
+                item.ExecuteTick <= cutoffTick && Overlaps(item.Target, targets)));
+            foreach (var address in targets)
             {
                 var estimate = GetEstimate(address);
                 estimate.SentTicks.RemoveAll(tick => tick <= cutoffTick);
                 estimate.LastCutoff = Math.Max(estimate.LastCutoff, cutoffTick);
+                estimate.ReportedCount = 0;
                 WriteEstimate(address, estimate);
             }
         }
+        return removed;
     }
 
-    public void NoteCancel(IEnumerable<ushort> addresses, ulong executeTick)
+    public IReadOnlyList<long> NoteCancel(IEnumerable<ushort> addresses, ulong executeTick)
     {
+        var targets = addresses.ToHashSet();
+        var removed = new List<long>();
         lock (_gate)
         {
-            foreach (var address in addresses)
+            removed.AddRange(RemovePending(item =>
+                item.ExecuteTick == executeTick && Overlaps(item.Target, targets)));
+            foreach (var address in targets)
             {
                 var estimate = GetEstimate(address);
                 estimate.SentTicks.RemoveAll(tick => tick == executeTick);
                 WriteEstimate(address, estimate);
             }
         }
+        return removed;
     }
 
     public void NoteQueueStatus(ushort address, ushort count)
@@ -156,7 +170,11 @@ public sealed class LedDispatchService
         lock (_gate)
         {
             var estimate = GetEstimate(address);
-            estimate.ReportedCount = count;
+            // The device only reports threshold transitions.  A RECOVERED
+            // report means it is at or below the target depth again; keeping
+            // that value as a permanent floor would block all future dispatch
+            // (350 + 0 is never < 350).
+            estimate.ReportedCount = count <= TargetQueueDepth ? 0 : count;
             WriteEstimate(address, estimate);
         }
     }
@@ -282,6 +300,28 @@ public sealed class LedDispatchService
                 null));
         }
         return sent;
+    }
+
+    private static bool Overlaps(TargetSpec target, HashSet<ushort> addresses) =>
+        target.Balloons.Any(balloon => addresses.Contains(balloon.MeshAddress));
+
+    private List<long> RemovePending(Func<PendingReservation, bool> predicate)
+    {
+        var removed = new List<long>();
+        for (var i = _pending.Count - 1; i >= 0; i--)
+        {
+            var item = _pending[i];
+            if (!predicate(item))
+            {
+                continue;
+            }
+            _pending.RemoveAt(i);
+            if (item.ShowStepId is { } showStepId)
+            {
+                removed.Add(showStepId);
+            }
+        }
+        return removed;
     }
 
     private QueueEstimate GetEstimate(ushort address) =>

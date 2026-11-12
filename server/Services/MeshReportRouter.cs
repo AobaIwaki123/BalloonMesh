@@ -65,39 +65,65 @@ public sealed class MeshReportRouter
             return 0;
         }
 
-        switch (op)
+        try
         {
-            case BalloonProtocol.OpFtmReport:
-                if (!BalloonProtocol.TryDecodeFtmReport(envelope.Payload, out var ftm))
-                {
-                    return 0;
-                }
-                _aggregator.AddReport(envelope.Src, ftm, envelope.GatewayId, envelope.ReceivedAt);
-                return 1;
+            switch (op)
+            {
+                case BalloonProtocol.OpFtmReport:
+                    if (!BalloonProtocol.TryDecodeFtmReport(envelope.Payload, out var ftm))
+                    {
+                        return 0;
+                    }
+                    _aggregator.AddReport(envelope.Src, ftm, envelope.GatewayId, envelope.ReceivedAt);
+                    return 1;
 
-            case BalloonProtocol.OpNeighborReport:
-                if (!BalloonProtocol.TryDecodeNeighborReport(envelope.Payload, out var neighbor))
-                {
-                    return 0;
-                }
-                _neighbors.Add(envelope.Src, neighbor.BatchId, neighbor.Entries, envelope.ReceivedAt);
-                return 1;
+                case BalloonProtocol.OpNeighborReport:
+                    if (!BalloonProtocol.TryDecodeNeighborReport(envelope.Payload, out var neighbor))
+                    {
+                        return 0;
+                    }
+                    _neighbors.Add(envelope.Src, neighbor.BatchId, neighbor.Entries,
+                        envelope.ReceivedAt);
+                    // A neighbor-only batch still has to be computable: when no
+                    // FTM report arrived (all anchors unreachable), the first
+                    // report opens the batch instead of being dropped.
+                    _aggregator.NoteNeighborReport(envelope.Src, neighbor.BatchId,
+                        envelope.ReceivedAt);
+                    return 1;
 
-            case BalloonProtocol.OpQueueStatus:
-                if (!BalloonProtocol.TryDecodeQueueStatus(envelope.Payload, out var queue))
-                {
-                    return 0;
-                }
-                var balloon = _fleet.ApplyQueueStatus(envelope.Src, queue.QueueCount);
-                _dispatch.NoteQueueStatus(envelope.Src, queue.QueueCount);
-                _ = _notifier.QueueUpdatedAsync(balloon);
-                _logger.LogInformation("queue status {Source:X4}: kind={Kind} count={Count}",
-                    envelope.Src, queue.Kind, queue.QueueCount);
-                return 1;
+                case BalloonProtocol.OpQueueStatus:
+                    if (!BalloonProtocol.TryDecodeQueueStatus(envelope.Payload, out var queue))
+                    {
+                        return 0;
+                    }
+                    if (_fleet.GetBalloonRecord(envelope.Src) is null)
+                    {
+                        _logger.LogWarning(
+                            "Ignoring QUEUE_STATUS from unknown balloon {Source:X4}",
+                            envelope.Src);
+                        return 0;
+                    }
+                    var balloon = _fleet.ApplyQueueStatus(envelope.Src, queue.QueueCount);
+                    _dispatch.NoteQueueStatus(envelope.Src, queue.QueueCount);
+                    _ = _notifier.QueueUpdatedAsync(balloon);
+                    _logger.LogInformation("queue status {Source:X4}: kind={Kind} count={Count}",
+                        envelope.Src, queue.Kind, queue.QueueCount);
+                    return 1;
 
-            default:
-                _logger.LogDebug("Ignoring uplink opcode 0x{Opcode:X2} from {Source:X4}", op, envelope.Src);
-                return 0;
+                default:
+                    _logger.LogDebug("Ignoring uplink opcode 0x{Opcode:X2} from {Source:X4}", op,
+                        envelope.Src);
+                    return 0;
+            }
+        }
+        catch (Exception exception)
+        {
+            // One malformed or unknown message must not abort the rest of the
+            // batch (HTTP 500) or close the gateway WebSocket.
+            _logger.LogWarning(exception,
+                "Ignoring opcode 0x{Opcode:X2} from {Source:X4} after handler failure",
+                op, envelope.Src);
+            return 0;
         }
     }
 }

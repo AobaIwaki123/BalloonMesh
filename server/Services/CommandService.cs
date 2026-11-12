@@ -107,6 +107,14 @@ public sealed class CommandService
     {
         var target = _fleet.ResolveTarget(request.TargetKind, request.Target);
         var executeAt = request.ExecuteAt.ToUniversalTime();
+        if (executeAt <= _time.GetUtcNow())
+        {
+            // Devices ignore tombstones for ticks they have already passed, so
+            // reporting success here would be a lie.
+            return new CommandResultDto(false,
+                "executeAt must be in the future to cancel a reservation.",
+                0, target.Balloons.Count, null, null);
+        }
         var tick = BalloonProtocol.Tick40FromUnixMs(executeAt.ToUnixTimeMilliseconds());
         var payload = BalloonProtocol.EncodeLedCancel(tick);
         var gateways = _dispatch.SendImmediate(target, BalloonProtocol.OpLedCancel, payload);
@@ -120,7 +128,11 @@ public sealed class CommandService
                 $"No reachable gateway; the cancellation for {target.Description} was not sent.");
         }
 
-        _dispatch.NoteCancel(target.Balloons.Select(balloon => balloon.MeshAddress), tick);
+        foreach (var stepId in _dispatch.NoteCancel(
+                     target.Balloons.Select(balloon => balloon.MeshAddress), tick))
+        {
+            _store.UpdateShowStepStatus(stepId, "canceled");
+        }
 
         var result = new CommandResultDto(
             true,
@@ -139,6 +151,18 @@ public sealed class CommandService
         if (step is null)
         {
             return null;
+        }
+        if (step.Status is not ("queued" or "sent"))
+        {
+            return new CommandResultDto(false,
+                $"Show step {id} is already {step.Status}.", 0, 0, null, null);
+        }
+        if (step.ExecuteAt <= _time.GetUtcNow())
+        {
+            _store.UpdateShowStepStatus(id, "expired");
+            return new CommandResultDto(false,
+                $"Show step {id} has already executed and cannot be cancelled.",
+                0, 0, null, null);
         }
         var result = await CancelAsync(
             new LedCancelRequest(step.TargetKind, step.Target, step.ExecuteAt), cancellationToken);
@@ -174,7 +198,10 @@ public sealed class CommandService
                 $"No reachable gateway; the reset for {target.Description} was not sent.");
         }
 
-        _dispatch.NoteCutoff(addresses, cutoffTick);
+        foreach (var stepId in _dispatch.NoteCutoff(addresses, cutoffTick))
+        {
+            _store.UpdateShowStepStatus(stepId, "canceled");
+        }
 
         if (request.SetNow)
         {

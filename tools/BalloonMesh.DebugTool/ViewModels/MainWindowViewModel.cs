@@ -15,6 +15,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
     private readonly DebugToolSettings _settings;
     private DebugApiClient? _client;
     private bool _warnedInsecureCredentials;
+    private bool _restoringSelection;
     private bool _disposed;
 
     public MainWindowViewModel(DebugToolSettings? settings = null)
@@ -32,10 +33,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         TargetKind = _settings.TargetKind;
         Target = _settings.Target;
         ResetCutoff = _settings.ResetCutoff;
+        ResetSetNow = _settings.ResetSetNow;
+        Red = _settings.Red;
+        Green = _settings.Green;
+        Blue = _settings.Blue;
+        ExecuteAt = _settings.ExecuteAt;
         InjectSource = _settings.InjectSource;
         InjectDst = _settings.InjectDst;
         FtmAnchor = _settings.FtmAnchor;
         FtmDistanceCm = _settings.FtmDistanceCm;
+        FtmTimestamp = _settings.FtmTimestamp;
         FtmBatchId = _settings.FtmBatchId;
         QueueKind = _settings.QueueKind;
         QueueCount = _settings.QueueCount;
@@ -45,6 +52,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         NeighborARssi = _settings.NeighborARssi;
         NeighborB = _settings.NeighborB;
         NeighborBRssi = _settings.NeighborBRssi;
+        ExpandShortOpcode = _settings.ExpandShortOpcode;
         UpdateCommandColor();
 
         AddLog("info", "BalloonMesh debug tool started. Enter the server URL and press Connect.");
@@ -192,7 +200,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedBalloonChanged(BalloonRowViewModel? value)
     {
-        if (value is null)
+        if (value is null || _restoringSelection)
         {
             return;
         }
@@ -232,8 +240,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
 
         if (selectedAddress is { } address)
         {
-            SelectedBalloon = Balloons.FirstOrDefault(balloon =>
-                balloon.Info.MeshAddress == address);
+            _restoringSelection = true;
+            try
+            {
+                SelectedBalloon = Balloons.FirstOrDefault(balloon =>
+                    balloon.Info.MeshAddress == address);
+            }
+            finally
+            {
+                _restoringSelection = false;
+            }
         }
     }
 
@@ -333,10 +349,16 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _settings.TargetKind = TargetKind;
         _settings.Target = Target;
         _settings.ResetCutoff = ResetCutoff;
+        _settings.ResetSetNow = ResetSetNow;
+        _settings.Red = Red;
+        _settings.Green = Green;
+        _settings.Blue = Blue;
+        _settings.ExecuteAt = ExecuteAt;
         _settings.InjectSource = InjectSource;
         _settings.InjectDst = InjectDst;
         _settings.FtmAnchor = FtmAnchor;
         _settings.FtmDistanceCm = FtmDistanceCm;
+        _settings.FtmTimestamp = FtmTimestamp;
         _settings.FtmBatchId = FtmBatchId;
         _settings.QueueKind = QueueKind;
         _settings.QueueCount = QueueCount;
@@ -346,6 +368,7 @@ public partial class MainWindowViewModel : ObservableObject, IDisposable
         _settings.NeighborARssi = NeighborARssi;
         _settings.NeighborB = NeighborB;
         _settings.NeighborBRssi = NeighborBRssi;
+        _settings.ExpandShortOpcode = ExpandShortOpcode;
 
         try
         {

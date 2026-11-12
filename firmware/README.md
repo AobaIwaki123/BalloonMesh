@@ -13,6 +13,14 @@ firmware/
   tests/      native Unity テスト
 ```
 
+## 前提
+
+- PlatformIO Core (`pio`) が PATH 上にあること
+- native テストは gcc が必要（Windows は MSYS2 の `C:\msys64\mingw64\bin` を PATH に追加）
+- 初回ビルドは ESP-IDF の Bluetooth スタックもソースからビルドするため、数分〜十数分かかる
+
+`build-all.ps1` は各 `pio` の終了コードを確認し、失敗時は非 0 で停止します。
+
 ## Build all projects
 
 ```powershell

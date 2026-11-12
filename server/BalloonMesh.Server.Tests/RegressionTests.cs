@@ -1,0 +1,162 @@
+using BalloonMesh.Protocol;
+using BalloonMesh.Server.Models;
+using BalloonMesh.Server.Services;
+using Microsoft.Extensions.Logging.Abstractions;
+
+namespace BalloonMesh.Server.Tests;
+
+[Collection("PostgresDatabase")]
+public sealed class RegressionTests
+{
+    private static (FleetService Fleet, FtmAggregator Aggregator, NeighborStore Neighbors,
+        LedDispatchService Dispatch, MeshReportRouter Router, TestTimeProvider Time,
+        RecordingMonitorEvents Events) CreateServices(TemporaryDatabase database)
+    {
+        var fleet = new FleetService(database.Store);
+        var events = new RecordingMonitorEvents();
+        var time = new TestTimeProvider(new DateTimeOffset(2026, 11, 8, 10, 0, 0, TimeSpan.Zero));
+        var neighbors = new NeighborStore();
+        var registry = new GatewayRegistry(events);
+        var aggregator = new FtmAggregator(fleet, neighbors, new PositionSolver(), events, time,
+            NullLogger<FtmAggregator>.Instance);
+        var dispatch = new LedDispatchService(registry, fleet, database.Store, events, time,
+            NullLogger<LedDispatchService>.Instance);
+        var router = new MeshReportRouter(fleet, aggregator, neighbors, dispatch, events,
+            NullLogger<MeshReportRouter>.Instance);
+        return (fleet, aggregator, neighbors, dispatch, router, time, events);
+    }
+
+    [Fact]
+    public void UnknownBalloonQueueStatusIsIgnoredInsteadOfFailingTheBatch()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var message = new GatewayEventDto(
+            0x0999,
+            BalloonProtocol.GroupQueueStatus,
+            BalloonProtocol.VendorOpcode(BalloonProtocol.OpQueueStatus),
+            Convert.ToHexString(BalloonProtocol.EncodeQueueStatus(
+                new QueueStatus(BalloonProtocol.OpQueueStatusNearFull, 401))),
+            -50,
+            7,
+            null);
+
+        Assert.Equal(0, services.Router.Handle(message, "gw-test"));
+    }
+
+    [Fact]
+    public async Task RecoveredQueueReportDoesNotBlockFutureDispatchForever()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var registry = new GatewayRegistry(services.Events);
+        registry.GetOrRegister("gw-test");
+        var dispatch = new LedDispatchService(registry, services.Fleet, database.Store,
+            services.Events, services.Time, NullLogger<LedDispatchService>.Instance);
+
+        dispatch.NoteQueueStatus(0x0101, 401);
+        var at = services.Time.GetUtcNow().AddMinutes(1);
+        Assert.True(dispatch.EnqueueScheduled(
+            services.Fleet.ResolveTarget("balloon", "0x0101"),
+            BalloonProtocol.Tick40FromUnixMs(at.ToUnixTimeMilliseconds()), at, 1, 2, 3));
+        Assert.Equal(0, await dispatch.TickAsync());
+
+        // RECOVERED reports can be exactly at the target depth; treating that
+        // number as a permanent floor would stop every future reservation.
+        dispatch.NoteQueueStatus(0x0101, 350);
+        Assert.Equal(1, await dispatch.TickAsync());
+        Assert.Equal(0, dispatch.PendingCount);
+    }
+
+    [Fact]
+    public void CancelRemovesTheMatchingPendingReservation()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var at = services.Time.GetUtcNow().AddMinutes(2);
+        var tick = BalloonProtocol.Tick40FromUnixMs(at.ToUnixTimeMilliseconds());
+        Assert.True(services.Dispatch.EnqueueScheduled(
+            services.Fleet.ResolveTarget("balloon", "0x0101"), tick, at, 1, 2, 3,
+            showStepId: 42));
+
+        var removed = services.Dispatch.NoteCancel([0x0101], tick);
+
+        Assert.Equal([42L], removed);
+        Assert.Equal(0, services.Dispatch.PendingCount);
+    }
+
+    [Fact]
+    public async Task CancellingAPastReservationIsRejected()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var registry = new GatewayRegistry(services.Events);
+        registry.GetOrRegister("gw-test");
+        var dispatch = new LedDispatchService(registry, services.Fleet, database.Store,
+            services.Events, services.Time, NullLogger<LedDispatchService>.Instance);
+        var commands = new CommandService(services.Fleet, dispatch, registry, database.Store,
+            services.Events, services.Time, NullLogger<CommandService>.Instance);
+
+        var result = await commands.CancelAsync(new LedCancelRequest(
+            "balloon", "0x0101", services.Time.GetUtcNow().AddSeconds(-1)), default);
+
+        Assert.False(result.Accepted);
+    }
+
+    [Fact]
+    public async Task NeighborOnlyBatchCanProduceAPosition()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var now = services.Time.GetUtcNow();
+        services.Neighbors.Add(0x0101, 7,
+            [new NeighborEntry(0x0102, -50)], now);
+        services.Aggregator.NoteNeighborReport(0x0101, 7, now);
+
+        services.Time.Advance(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, await services.Aggregator.ProcessDueAsync(services.Time.GetUtcNow()));
+        Assert.NotEqual("seed", services.Fleet.GetBalloon(0x0101)!.LastMethod);
+    }
+
+    [Fact]
+    public void SettingAnInitialPositionMovesTheDisplayedPosition()
+    {
+        using var database = new TemporaryDatabase();
+        var fleet = new FleetService(database.Store);
+
+        var updated = fleet.SetInitialPosition(0x0101, 12.345, 67.890);
+
+        Assert.Equal(12.345, updated.Lat!.Value, 6);
+        Assert.Equal(67.890, updated.Lon!.Value, 6);
+        Assert.Equal("initial", updated.LastMethod);
+    }
+
+    [Fact]
+    public async Task UnprovisionedWebSocketGatewayIsNotCountedAsDelivery()
+    {
+        var registry = new GatewayRegistry(new RecordingMonitorEvents());
+        var generation = registry.AttachWebSocket("gw-test", null, "0.1.0",
+            provisioned: false, spoolPending: 0);
+        var command = new DownlinkCommand(0xC010, 1, [1], 7);
+
+        Assert.Equal(0, registry.Broadcast(command));
+
+        await registry.DetachWebSocketAsync("gw-test", generation);
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0);
+        Assert.Equal(1, registry.Broadcast(command));
+    }
+
+    [Fact]
+    public async Task StaleWebSocketDetachDoesNotClearANewerConnection()
+    {
+        var registry = new GatewayRegistry(new RecordingMonitorEvents());
+        var oldGeneration = registry.AttachWebSocket("gw-test", null, "0.1.0",
+            provisioned: true, spoolPending: 0);
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0);
+
+        await registry.DetachWebSocketAsync("gw-test", oldGeneration);
+
+        var gateway = Assert.Single(registry.Snapshot());
+        Assert.True(gateway.WebSocket);
+    }
+}

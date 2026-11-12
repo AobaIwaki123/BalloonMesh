@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 
 namespace BalloonMesh.DebugTool.Core;
 
@@ -381,6 +382,7 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
             await socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
             await SendOnSocketAsync(socket, GatewayProtocolCodec.CreateHello(options),
                 cancellationToken).ConfigureAwait(false);
+            await WaitForHelloAckAsync(socket, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -489,7 +491,73 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
         finally
         {
+            // The server closed or the read failed: release the socket now so
+            // a restart does not leak the old connection.
+            DisposeSocket();
             MarkLoopStopped(generation, "WebSocket disconnected");
+        }
+    }
+
+    private async Task WaitForHelloAckAsync(ClientWebSocket socket,
+        CancellationToken cancellationToken)
+    {
+        // The server rejects a bad token immediately after hello.  Waiting for
+        // its explicit ack turns that into a failed Start instead of a brief
+        // "connected" state that the receive loop discovers later.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        var buffer = new byte[4096];
+        using var stream = new MemoryStream();
+        try
+        {
+            while (true)
+            {
+                var result = await socket.ReceiveAsync(buffer, timeout.Token)
+                    .ConfigureAwait(false);
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    throw new WebSocketException(
+                        $"Gateway handshake rejected ({result.CloseStatus}: " +
+                        $"{result.CloseStatusDescription}). Check the gateway token.");
+                }
+                if (result.MessageType != WebSocketMessageType.Text)
+                {
+                    continue;
+                }
+                stream.Write(buffer, 0, result.Count);
+                if (stream.Length > 1024 * 1024)
+                {
+                    throw new WebSocketException("Gateway handshake response was too large.");
+                }
+                if (!result.EndOfMessage)
+                {
+                    continue;
+                }
+                var text = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+                stream.SetLength(0);
+                using var document = JsonDocument.Parse(text);
+                if (document.RootElement.TryGetProperty("type", out var type) &&
+                    string.Equals(type.GetString(), "helloAck", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                // A very fast downlink could arrive before the ack; keep it
+                // visible and continue waiting.
+                if (GatewayProtocolCodec.TryParseDownlink(text, out var command, out _))
+                {
+                    RaiseCommand(command, text);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Older servers do not send an ack; fall back to the previous
+            // behaviour rather than failing a connection that is still open.
+        }
+        catch (JsonException exception)
+        {
+            throw new WebSocketException("Gateway handshake response was not valid JSON.",
+                exception);
         }
     }
 
