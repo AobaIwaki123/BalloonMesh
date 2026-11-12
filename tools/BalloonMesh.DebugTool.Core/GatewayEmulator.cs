@@ -526,22 +526,39 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
         catch (WebSocketException exception)
         {
-            _helloAck?.TrySetException(exception);
+            if (IsCurrentRun(generation))
+            {
+                _helloAck?.TrySetException(exception);
+            }
             RaiseLog($"WebSocket closed: {exception.Message}");
         }
         catch (Exception exception)
         {
-            _helloAck?.TrySetException(exception);
+            if (IsCurrentRun(generation))
+            {
+                _helloAck?.TrySetException(exception);
+            }
             RaiseLog($"WebSocket receive failed: {exception.Message}");
         }
         finally
         {
-            _helloAck?.TrySetException(new WebSocketException(
-                "The WebSocket disconnected before the gateway handshake completed."));
-            // The server closed or the read failed: release the socket now so
-            // a restart does not leak the old connection.
-            DisposeSocket();
+            if (IsCurrentRun(generation))
+            {
+                _helloAck?.TrySetException(new WebSocketException(
+                    "The WebSocket disconnected before the gateway handshake completed."));
+            }
+            // Release only this run's socket; a timed-out Stop can be followed
+            // by a new Start before the old loop unwinds.
+            DisposeSocketIfCurrent(generation);
             MarkLoopStopped(generation, "WebSocket disconnected");
+        }
+    }
+
+    private bool IsCurrentRun(long generation)
+    {
+        lock (_gate)
+        {
+            return generation == _runGeneration;
         }
     }
 
@@ -648,6 +665,26 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 Debug.WriteLine($"Gateway emulator event handler failed: {exception}");
             }
         }
+    }
+
+    private void DisposeSocketIfCurrent(long generation)
+    {
+        ClientWebSocket? socket;
+        lock (_gate)
+        {
+            if (generation != _runGeneration)
+            {
+                return;
+            }
+            socket = _socket;
+            _socket = null;
+        }
+        if (socket is null)
+        {
+            return;
+        }
+        socket.Abort();
+        socket.Dispose();
     }
 
     private void DisposeSocket()

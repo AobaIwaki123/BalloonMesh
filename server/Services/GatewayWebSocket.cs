@@ -106,7 +106,7 @@ public static class GatewayWebSocket
                     {
                         break;
                     }
-                    registry.Touch(gatewayId);
+                    registry.Touch(gatewayId, webSocket: true);
                     try
                     {
                         using var document = JsonDocument.Parse(text);

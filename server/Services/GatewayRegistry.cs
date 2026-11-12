@@ -21,6 +21,9 @@ public sealed class GatewayClient
 
     private long _webSocketGeneration;
 
+    /// <summary>Serializes attach/detach/state swaps for this gateway.</summary>
+    public object ConnectionGate { get; } = new();
+
     public string Id { get; }
     public Channel<DownlinkCommand> Commands { get; }
     public bool WebSocketConnected { get; set; }
@@ -71,9 +74,25 @@ public sealed class GatewayRegistry
         bool provisioned, int spoolPending, CancellationTokenSource lifetime)
     {
         var client = GetOrRegister(id, firmware);
+        long generation;
+        CancellationTokenSource? previous;
+        lock (client.ConnectionGate)
+        {
+            // Bump first: the old handler's detach/state callbacks must see a
+            // stale generation as soon as the new connection is accepted.
+            generation = client.BumpWebSocketGeneration();
+            previous = client.WebSocketLifetime;
+            client.WebSocketLifetime = lifetime;
+            client.Provisioned = provisioned;
+            client.ProvisionedReported = true;
+            client.SpoolPending = spoolPending;
+            client.WebSocketConnected = true;
+            client.HasWebSocket = true;
+            client.Remote = remote;
+        }
         // Retire the previous connection so a half-open socket cannot keep
         // draining the shared command channel.
-        if (client.WebSocketLifetime is { } previous)
+        if (previous is not null)
         {
             try
             {
@@ -84,27 +103,23 @@ public sealed class GatewayRegistry
                 // The previous handler already finished.
             }
         }
-        client.WebSocketLifetime = lifetime;
-        client.Provisioned = provisioned;
-        client.ProvisionedReported = true;
-        client.SpoolPending = spoolPending;
-        client.WebSocketConnected = true;
-        client.HasWebSocket = true;
-        client.Remote = remote;
-        var generation = client.BumpWebSocketGeneration();
         _ = NotifyChangedAsync();
         return generation;
     }
 
     public async Task DetachWebSocketAsync(string id, long generation)
     {
-        if (_clients.TryGetValue(id, out var client) &&
-            client.WebSocketGeneration == generation)
+        if (_clients.TryGetValue(id, out var client))
         {
-            // Only the connection that is still current may clear the flag: a
-            // reconnect can attach before the old handler's finally block runs.
-            client.WebSocketConnected = false;
-            client.LastSeen = DateTimeOffset.UtcNow;
+            lock (client.ConnectionGate)
+            {
+                if (client.WebSocketGeneration == generation)
+                {
+                    // Only the current connection may clear the flag.
+                    client.WebSocketConnected = false;
+                    client.LastSeen = DateTimeOffset.UtcNow;
+                }
+            }
         }
         await NotifyChangedAsync();
     }
@@ -113,18 +128,54 @@ public sealed class GatewayRegistry
         long? generation = null)
     {
         var client = GetOrRegister(id);
-        if (generation is { } expected &&
-            client.WebSocketGeneration != expected)
-        {
-            // A stale connection must not overwrite the current one's state.
-            return;
-        }
         var changed = false;
-        if (provisioned is { } value)
+        lock (client.ConnectionGate)
         {
-            if (client.Provisioned != value)
+            if (generation is { } expected &&
+                client.WebSocketGeneration != expected)
             {
-                client.Provisioned = value;
+                // A stale connection must not overwrite the current one's state.
+                return;
+            }
+            if (provisioned is { } value)
+            {
+                if (client.Provisioned != value)
+                {
+                    client.Provisioned = value;
+                    changed = true;
+                }
+                if (!client.ProvisionedReported)
+                {
+                    client.ProvisionedReported = true;
+                    changed = true;
+                }
+            }
+            if (spoolPending is { } spool && client.SpoolPending != spool)
+            {
+                client.SpoolPending = spool;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            _ = NotifyChangedAsync();
+        }
+    }
+
+    /// <summary>
+    /// A gateway only polls commands after its mesh models are ready, so a
+    /// successful poll is itself a readiness signal.  This prevents an HTTP
+    /// gateway from latching "unready" forever after an early spooled event.
+    /// </summary>
+    public void MarkReady(string id)
+    {
+        var client = GetOrRegister(id);
+        var changed = false;
+        lock (client.ConnectionGate)
+        {
+            if (!client.Provisioned)
+            {
+                client.Provisioned = true;
                 changed = true;
             }
             if (!client.ProvisionedReported)
@@ -133,22 +184,30 @@ public sealed class GatewayRegistry
                 changed = true;
             }
         }
-        if (spoolPending is { } spool && client.SpoolPending != spool)
-        {
-            client.SpoolPending = spool;
-            changed = true;
-        }
         if (changed)
         {
             _ = NotifyChangedAsync();
         }
     }
 
-    public void Touch(string id, string? firmware = null)
+    public void Touch(string id, string? firmware = null, bool webSocket = false)
     {
         var isNew = !_clients.ContainsKey(id);
         var client = GetOrRegister(id, firmware);
-        client.LastSeen = DateTimeOffset.UtcNow;
+        lock (client.ConnectionGate)
+        {
+            client.LastSeen = DateTimeOffset.UtcNow;
+            if (webSocket)
+            {
+                client.HasWebSocket = true;
+            }
+            else if (!client.WebSocketConnected)
+            {
+                // A gateway that never reconnects its WebSocket may have
+                // switched to HTTP; let the HTTP activity rule apply again.
+                client.HasWebSocket = false;
+            }
+        }
         if (isNew)
         {
             _ = NotifyChangedAsync();

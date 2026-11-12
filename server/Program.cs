@@ -348,6 +348,9 @@ app.MapGet("/api/gateway/{id}/commands",
             return Results.Unauthorized();
         }
         registry.Touch(id);
+        // The firmware only polls after provisioning and model binding are
+        // complete, so polling is a readiness signal.
+        registry.MarkReady(id);
         var wait = Math.Clamp(waitMs ?? 10_000, 0, 30_000);
         var first = await registry.ReadCommandAsync(id, wait, cancellationToken);
         if (first is null)

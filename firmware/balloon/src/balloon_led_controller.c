@@ -146,6 +146,9 @@ void bm_led_controller_init(bm_queue_status_sender_t sender) {
     }
     s_controller.sender = sender;
     s_controller.last_save_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    /* Announce a restored near-full queue immediately; if the mesh is not
+     * bound yet the controller keeps the status pending and retries. */
+    refresh_monitor_locked();
     s_controller.initialized = true;
     xTaskCreate(led_task, "led_queue", 4096, NULL, 6, NULL);
 }
