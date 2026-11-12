@@ -73,6 +73,27 @@ public sealed class RegressionTests
     }
 
     [Fact]
+    public void ReportedDepthDecaysAsKnownReservationsExecute()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var at = services.Time.GetUtcNow().AddSeconds(1);
+        var target = services.Fleet.ResolveTarget("balloon", "0x0101");
+        Assert.Single(target.Balloons);
+        services.Dispatch.SeedSentReservations(
+        [
+            (target, BalloonProtocol.Tick40FromUnixMs(at.ToUnixTimeMilliseconds()))
+        ]);
+        Assert.Equal(1, services.Dispatch.GetEstimatedCount(0x0101));
+        services.Dispatch.NoteQueueStatus(0x0101, 350);
+        Assert.Equal(350, services.Dispatch.GetEstimatedCount(0x0101));
+
+        services.Time.Advance(TimeSpan.FromSeconds(2));
+
+        Assert.Equal(349, services.Dispatch.GetEstimatedCount(0x0101));
+    }
+
+    [Fact]
     public void CancelRemovesTheMatchingPendingReservation()
     {
         using var database = new TemporaryDatabase();
@@ -175,10 +196,44 @@ public sealed class RegressionTests
             services.Events, services.Time, NullLogger<LedDispatchService>.Instance);
         var worker = new ShowRecoveryWorker(database.Store, services.Fleet, dispatcher,
             services.Time, NullLogger<ShowRecoveryWorker>.Instance);
+        Assert.Single(database.Store.GetFutureShowSteps("sent",
+            services.Time.GetUtcNow()));
 
         Assert.Equal(0, await worker.RecoverAsync());
         Assert.Equal(1, dispatcher.GetEstimatedCount(0x0101));
         Assert.Equal("sent", database.Store.GetShowStep(id)!.Status);
+    }
+
+    [Fact]
+    public async Task CancellingASentReservationMarksItCanceledForRecovery()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var at = services.Time.GetUtcNow().AddMinutes(2);
+        var id = database.Store.AddShowStep("sent", "balloon", "0x0101", at,
+            1, 2, 3, "sent");
+        var registry = new GatewayRegistry(services.Events);
+        registry.GetOrRegister("gw-test");
+        var dispatcher = new LedDispatchService(registry, services.Fleet, database.Store,
+            services.Events, services.Time, NullLogger<LedDispatchService>.Instance);
+        var commands = new CommandService(services.Fleet, dispatcher, registry,
+            database.Store, services.Events, services.Time,
+            NullLogger<CommandService>.Instance);
+
+        var result = await commands.CancelAsync(
+            new LedCancelRequest("balloon", "0x0101", at), default);
+
+        Assert.True(result.Accepted);
+        Assert.Equal("canceled", database.Store.GetShowStep(id)!.Status);
+
+        var recoveryDispatcher = new LedDispatchService(registry, services.Fleet,
+            database.Store, services.Events, services.Time,
+            NullLogger<LedDispatchService>.Instance);
+        var worker = new ShowRecoveryWorker(database.Store, services.Fleet,
+            recoveryDispatcher, services.Time,
+            NullLogger<ShowRecoveryWorker>.Instance);
+        await worker.RecoverAsync();
+        Assert.Equal(0, recoveryDispatcher.GetEstimatedCount(0x0101));
     }
 
     [Fact]

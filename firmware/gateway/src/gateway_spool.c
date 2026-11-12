@@ -101,6 +101,10 @@ static void load_from_nvs(void) {
             for (uint16_t i = 0; i < count; ++i) {
                 decode_event(&buffer[BM_SPOOL_HEADER + (size_t)i * BM_SPOOL_EVENT_BYTES],
                              &s_spool.events[i]);
+                /* received_ms is uptime from the previous boot and cannot be
+                 * compared with esp_timer_get_time() after a reboot.  Mark it
+                 * unknown; senders report a stale age and the server drops it. */
+                s_spool.events[i].received_ms = 0;
                 s_spool.sequences[i] = i;
             }
             s_spool.head = 0;

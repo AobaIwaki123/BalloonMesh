@@ -32,6 +32,7 @@ public sealed class GatewayClient
     public DownlinkCommand? PendingCommand { get; set; }
     public bool WebSocketConnected { get; set; }
     public bool HasWebSocket { get; set; }
+    public bool HttpPolling { get; set; }
     public bool ProvisionedReported { get; set; }
     public long WebSocketGeneration => Interlocked.Read(ref _webSocketGeneration);
     public CancellationTokenSource? WebSocketLifetime { get; set; }
@@ -208,6 +209,29 @@ public sealed class GatewayRegistry
         }
     }
 
+    public void BeginPoll(string id)
+    {
+        var client = GetOrRegister(id);
+        lock (client.ConnectionGate)
+        {
+            client.HttpPolling = true;
+            client.HasWebSocket = false;
+            client.LastSeen = DateTimeOffset.UtcNow;
+        }
+    }
+
+    public void EndPoll(string id)
+    {
+        if (_clients.TryGetValue(id, out var client))
+        {
+            lock (client.ConnectionGate)
+            {
+                client.HttpPolling = false;
+                client.LastSeen = DateTimeOffset.UtcNow;
+            }
+        }
+    }
+
     public void Touch(string id, string? firmware = null, bool webSocket = false)
     {
         var isNew = !_clients.ContainsKey(id);
@@ -238,7 +262,11 @@ public sealed class GatewayRegistry
         {
             // HTTP gateways are never removed, so only recently seen or
             // WebSocket-connected clients count as active receivers.
-            var cutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
+            var now = DateTimeOffset.UtcNow;
+            // An HTTP gateway is a delivery path only while it is actually
+            // long-polling (or just finished a poll).  A gateway that stopped
+            // polling must not make a command look delivered.
+            var httpCutoff = now.AddSeconds(-5);
             var clients = _clients.Values
                 .Where(client => client.HasWebSocket
                     // A detached WebSocket gateway must not fall back to the
@@ -248,7 +276,7 @@ public sealed class GatewayRegistry
                     ? client.WebSocketConnected && client.Provisioned
                     // HTTP gateways are only active while they keep polling.
                     // If they explicitly reported "not ready", respect it.
-                    : client.LastSeen >= cutoff &&
+                    : (client.HttpPolling || client.LastSeen >= httpCutoff) &&
                       (!client.ProvisionedReported || client.Provisioned))
                 .ToArray();
             // One full gateway must not block delivery through the remaining

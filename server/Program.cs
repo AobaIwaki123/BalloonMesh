@@ -347,23 +347,31 @@ app.MapGet("/api/gateway/{id}/commands",
         {
             return Results.Unauthorized();
         }
-        registry.Touch(id);
+        registry.BeginPoll(id);
         // The firmware only polls after provisioning and model binding are
         // complete, so polling is a readiness signal.
         registry.MarkReady(id);
-        var wait = Math.Clamp(waitMs ?? 10_000, 0, 30_000);
-        var first = await registry.ReadCommandAsync(id, wait, cancellationToken);
-        if (first is null)
+        try
         {
-            return Results.NoContent();
-        }
+            var wait = Math.Clamp(waitMs ?? 10_000, 0, 30_000);
+            var first = await registry.ReadCommandAsync(id, wait, cancellationToken);
+            if (first is null)
+            {
+                return Results.NoContent();
+            }
 
-        var commands = new List<GatewayCommandDto> { first.ToDto() };
-        while (commands.Count < 32 && registry.TryReadCommand(id, out var next) && next is not null)
-        {
-            commands.Add(next.ToDto());
+            var commands = new List<GatewayCommandDto> { first.ToDto() };
+            while (commands.Count < 32 && registry.TryReadCommand(id, out var next) &&
+                   next is not null)
+            {
+                commands.Add(next.ToDto());
+            }
+            return Results.Ok(new GatewayCommandsRequest(commands));
         }
-        return Results.Ok(new GatewayCommandsRequest(commands));
+        finally
+        {
+            registry.EndPoll(id);
+        }
     });
 
 app.Run();

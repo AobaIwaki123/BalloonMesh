@@ -182,7 +182,9 @@ static void ws_sender_task(void *argument) {
         }
         char hex[17];
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-        uint32_t age_ms = now_ms - event.received_ms;
+        uint32_t age_ms = event.received_ms == 0
+                              ? 120000u
+                              : now_ms - event.received_ms;
         hex_encode(event.payload, event.length, hex, sizeof(hex));
         char json[352];
         int length = snprintf(json, sizeof(json),

@@ -134,6 +134,7 @@ public sealed class CommandService
         {
             _store.UpdateShowStepStatus(stepId, "canceled");
         }
+        MarkSentStepsCanceled(target, tick, through: false);
 
         var result = new CommandResultDto(
             true,
@@ -208,6 +209,7 @@ public sealed class CommandService
         {
             _store.UpdateShowStepStatus(stepId, "canceled");
         }
+        MarkSentStepsCanceled(target, cutoffTick, through: true);
 
         if (request.SetNow)
         {
@@ -233,6 +235,41 @@ public sealed class CommandService
         finally
         {
             _resetGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// A sent reservation stays in the DB as "sent" after a later cancel or
+    /// reset.  Mark the matching future rows so restart recovery does not seed
+    /// them back into the queue estimate.
+    /// </summary>
+    private void MarkSentStepsCanceled(TargetSpec target, ulong tick, bool through)
+    {
+        var addresses = target.Balloons
+            .Select(balloon => balloon.MeshAddress)
+            .ToHashSet();
+        foreach (var step in _store.GetFutureShowSteps("sent", _time.GetUtcNow()))
+        {
+            var stepTick = BalloonProtocol.Tick40FromUnixMs(
+                step.ExecuteAt.ToUnixTimeMilliseconds());
+            if (through ? stepTick > tick : stepTick != tick)
+            {
+                continue;
+            }
+            TargetSpec stepTarget;
+            try
+            {
+                stepTarget = _fleet.ResolveTarget(step.TargetKind, step.Target);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+            if (stepTarget.Balloons.Count > 0 &&
+                stepTarget.Balloons.All(balloon => addresses.Contains(balloon.MeshAddress)))
+            {
+                _store.UpdateShowStepStatus(step.Id, "canceled");
+            }
         }
     }
 

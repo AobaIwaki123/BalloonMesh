@@ -46,7 +46,13 @@ public sealed class MeshReportRouter
             _logger.LogWarning("Gateway {Gateway} sent invalid hex payload", gatewayId);
             return 0;
         }
-        var age = Math.Max(0, message.AgeMs ?? 0);
+        var age = Math.Max(0L, message.AgeMs ?? 0);
+        if (age > 60_000)
+        {
+            _logger.LogWarning(
+                "Ignoring {AgeMs} ms old event from gateway {Gateway}", age, gatewayId);
+            return 0;
+        }
         return Handle(new MeshEnvelope(
             gatewayId,
             message.Src,

@@ -141,6 +141,8 @@ public sealed class LedDispatchService
                 estimate.SentTicks.RemoveAll(tick => tick <= cutoffTick);
                 estimate.LastCutoff = Math.Max(estimate.LastCutoff, cutoffTick);
                 estimate.ReportedCount = 0;
+                estimate.ReportedAtTick = 0;
+                estimate.LastDecayTick = 0;
                 _lastCutoff[address] = Math.Max(
                     _lastCutoff.GetValueOrDefault(address), cutoffTick);
                 WriteEstimate(address, estimate);
@@ -172,18 +174,30 @@ public sealed class LedDispatchService
     /// before a server restart.  Without this the dispatcher assumes an empty
     /// device queue and can overfill it after recovery.
     /// </summary>
-    public void SeedSentReservation(TargetSpec target, ulong executeTick)
+    public void SeedSentReservations(
+        IReadOnlyList<(TargetSpec Target, ulong ExecuteTick)> reservations)
     {
         lock (_gate)
         {
-            foreach (var balloon in target.Balloons)
+            var estimates = new Dictionary<ushort, QueueEstimate>();
+            foreach (var (target, executeTick) in reservations)
             {
-                var estimate = GetEstimate(balloon.MeshAddress);
-                if (!estimate.SentTicks.Contains(executeTick))
+                foreach (var balloon in target.Balloons)
                 {
-                    estimate.SentTicks.Add(executeTick);
+                    if (!estimates.TryGetValue(balloon.MeshAddress, out var estimate))
+                    {
+                        estimate = GetEstimate(balloon.MeshAddress);
+                        estimates[balloon.MeshAddress] = estimate;
+                    }
+                    if (!estimate.SentTicks.Contains(executeTick))
+                    {
+                        estimate.SentTicks.Add(executeTick);
+                    }
                 }
-                WriteEstimate(balloon.MeshAddress, estimate);
+            }
+            foreach (var pair in estimates)
+            {
+                WriteEstimate(pair.Key, pair.Value);
             }
         }
     }
@@ -193,11 +207,12 @@ public sealed class LedDispatchService
         lock (_gate)
         {
             var estimate = GetEstimate(address);
-            // Keep the reported depth as-is.  Firmware now sends it
-            // periodically, so a value at the target is refreshed as the queue
-            // drains instead of becoming a permanent floor (or being assumed
-            // to be zero, which would overfill the device).
+            // Keep the reported depth as-is.  Firmware sends it periodically,
+            // and EffectiveCount decays it as known reservations execute so it
+            // cannot pin the estimate at a stale value.
             estimate.ReportedCount = count;
+            estimate.ReportedAtTick = BalloonProtocol.NowTick40(_time);
+            estimate.LastDecayTick = estimate.ReportedAtTick;
             WriteEstimate(address, estimate);
         }
     }
@@ -221,12 +236,6 @@ public sealed class LedDispatchService
         lock (_gate)
         {
             var selectedCounts = new Dictionary<ushort, int>();
-            foreach (var address in _estimates.Keys.ToArray())
-            {
-                var estimate = GetEstimate(address);
-                estimate.SentTicks.RemoveAll(tick => tick + 300 <= nowTick); // 3 s grace
-            }
-
             foreach (var item in _pending)
             {
                 if (item.ExecuteAt <= now)
@@ -372,11 +381,23 @@ public sealed class LedDispatchService
     {
         public List<ulong> SentTicks { get; } = [];
         public int ReportedCount { get; set; }
+        public ulong ReportedAtTick { get; set; }
+        public ulong LastDecayTick { get; set; }
         public ulong LastCutoff { get; set; }
 
         public int EffectiveCount(ulong nowTick)
         {
-            SentTicks.RemoveAll(tick => tick <= nowTick);
+            if (ReportedCount > 0 && ReportedAtTick > 0)
+            {
+                var from = Math.Max(LastDecayTick, ReportedAtTick);
+                if (nowTick > from)
+                {
+                    var executed = SentTicks.Count(tick => tick > from && tick <= nowTick);
+                    ReportedCount = Math.Max(0, ReportedCount - executed);
+                    LastDecayTick = nowTick;
+                }
+            }
+            SentTicks.RemoveAll(tick => tick + 300 <= nowTick); // 3 s grace
             return Math.Clamp(Math.Max(ReportedCount, SentTicks.Count), 0, HardQueueDepth);
         }
     }

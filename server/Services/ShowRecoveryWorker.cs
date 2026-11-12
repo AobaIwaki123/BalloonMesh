@@ -75,7 +75,7 @@ public sealed class ShowRecoveryWorker : BackgroundService
 
     private void RebuildSentEstimates(DateTimeOffset now)
     {
-        var seeded = 0;
+        var reservations = new List<(TargetSpec Target, ulong ExecuteTick)>();
         foreach (var step in _store.GetFutureShowSteps("sent", now))
         {
             try
@@ -83,8 +83,7 @@ public sealed class ShowRecoveryWorker : BackgroundService
                 var target = _fleet.ResolveTarget(step.TargetKind, step.Target);
                 var tick = BalloonProtocol.Tick40FromUnixMs(
                     step.ExecuteAt.ToUnixTimeMilliseconds());
-                _dispatch.SeedSentReservation(target, tick);
-                seeded++;
+                reservations.Add((target, tick));
             }
             catch (ArgumentException exception)
             {
@@ -92,10 +91,12 @@ public sealed class ShowRecoveryWorker : BackgroundService
                     step.Id, exception.Message);
             }
         }
-        if (seeded > 0)
+        if (reservations.Count > 0)
         {
+            _dispatch.SeedSentReservations(reservations);
             _logger.LogInformation(
-                "restored {Count} already-sent show step(s) into queue estimates", seeded);
+                "restored {Count} already-sent show step(s) into queue estimates",
+                reservations.Count);
         }
     }
 

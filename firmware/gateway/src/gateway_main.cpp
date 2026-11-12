@@ -118,7 +118,9 @@ static void upload_events_task(void *argument) {
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
         for (uint16_t i = 0; body_ok && i < count; ++i) {
             char hex[17];
-            uint32_t age_ms = now_ms - events[i].received_ms;
+            uint32_t age_ms = events[i].received_ms == 0
+                                  ? 120000u
+                                  : now_ms - events[i].received_ms;
             hex_encode(events[i].payload, events[i].length, hex, sizeof(hex));
             size_t remaining = capacity - (size_t)written;
             int appended = snprintf(body + written, remaining,

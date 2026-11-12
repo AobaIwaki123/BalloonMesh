@@ -155,7 +155,7 @@ static void led_task(void *argument) {
             /* Report the actual depth periodically.  Without this a server
              * restart (or a lost transition packet) leaves its estimate stale
              * until the device happens to cross 401/350 again. */
-            if ((uint32_t)(now_ms - s_controller.last_periodic_status_ms) >= 30000u) {
+            if ((uint32_t)(now_ms - s_controller.last_periodic_status_ms) >= 10000u) {
                 s_controller.last_periodic_status_ms = now_ms;
                 send_status_locked(
                     s_controller.monitor.near_full ? BM_QUEUE_STATUS_NEAR_FULL
