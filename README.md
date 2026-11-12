@@ -78,35 +78,20 @@ SIMULATION_ENABLED=false docker compose up -d --build
 
 ### 1. クラウド / AWS Lightsail へのデプロイ
 
-常時接続 WebSocket (`/ws/gateway`, `/hubs/monitor`) や測位バッチ集約ワーカーが稼働するため、Vercel 等のサーバーレスではなく常時起動 VPS（Amazon Lightsail 等）でのホスティングを推奨します。手元から 1 コマンドで作成・更新・破棄ができるスクリプトを用意しています。
-
-#### デプロイ（新規作成または差分更新） (`scripts/lightsail-deploy.sh`)
-AWS CLI が設定された環境でスクリプトを実行します。**Lightsail インスタンスが存在しない場合は自動新規作成（ポート開放・初回デプロイ含む）され、既に存在する場合は差分のみを高速反映**します：
+常時接続 WebSocket (`/ws/gateway`, `/hubs/monitor`) や測位バッチ集約ワーカーが稼働するため、Vercel 等のサーバーレスではなく常時起動 VPS（Amazon Lightsail 等）でのホスティングを推奨します。手元から 1 コマンドで作成・更新・破棄ができるスクリプトを用意しています：
 
 ```bash
-# デモモードでデプロイ（デフォルト: 2GB RAM プラン、仮想50台シミュレーション）
+# デプロイ（インスタンスが無ければ自動新規作成、既にあれば差分更新）
 ./scripts/lightsail-deploy.sh
 
-# 本番・実機モードでデプロイ（シミュレーション停止、物理ESP32待受）
+# 本番実機モード（シミュレーション停止、物理ESP32待受）でデプロイ
 ./scripts/lightsail-deploy.sh --prod
 
-# $7/月の最小プラン (1GB RAM) で新規作成してデプロイ
-./scripts/lightsail-deploy.sh --bundle micro_3_0
-```
-
-| オプション | 説明 | デフォルト値 |
-|---|---|---|
-| `--demo` / `--prod` | 動作モード（`--demo`: 仮想50台シミュレーション, `--prod`: 本番実機待受） | `--demo` |
-| `--bundle <ID>` | プラン指定（`small_3_0`: 2GB/$12/月, `micro_3_0`: 1GB/$7/月） | `small_3_0` |
-| `--key <PATH>` | SSH 秘密鍵パス（未指定時は `~/.ssh/` から自動検出） | 自動検出 |
-| `--name <NAME>` | Lightsail インスタンス名 | `balloonmesh-server` |
-
-#### インスタンスの破棄（課金停止） (`scripts/lightsail-destroy.sh`)
-検証完了後、1 コマンドでインスタンス・ディスク・キーペアを完全削除して課金を停止できます：
-
-```bash
+# 破棄（インスタンス削除・課金停止）
 ./scripts/lightsail-destroy.sh
 ```
+
+必要最小限の **IAM 権限設定（インラインポリシー）**、オプション一覧、コスト試算などの詳細は **[docs/deployment.md](docs/deployment.md)** を参照してください。
 
 ---
 
