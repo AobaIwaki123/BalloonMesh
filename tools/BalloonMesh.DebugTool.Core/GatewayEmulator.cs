@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
-using System.Text.Json;
 
 namespace BalloonMesh.DebugTool.Core;
 
@@ -39,7 +38,6 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
     private CancellationTokenSource? _runCts;
     private Task? _loop;
     private ClientWebSocket? _socket;
-    private TaskCompletionSource<bool>? _helloAck;
     private bool _loopAlive;
     private long _runGeneration;
     private bool _disposed;
@@ -149,11 +147,8 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 }
 
                 long generation;
-                var ack = new TaskCompletionSource<bool>(
-                    TaskCreationOptions.RunContinuationsAsynchronously);
                 lock (_gate)
                 {
-                    _helloAck = _options.Transport == GatewayTransport.WebSocket ? ack : null;
                     _loopAlive = true;
                     generation = ++_runGeneration;
                 }
@@ -168,20 +163,10 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
 
                 if (_options.Transport == GatewayTransport.WebSocket)
                 {
-                    // The receive loop is already running, so a timeout here
-                    // leaves the socket usable for older servers that do not
-                    // send helloAck.  A close/rejection still fails Start.
-                    using var ackTimeout = CancellationTokenSource.CreateLinkedTokenSource(
-                        cts.Token);
-                    ackTimeout.CancelAfter(TimeSpan.FromSeconds(5));
-                    try
-                    {
-                        await ack.Task.WaitAsync(ackTimeout.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) when (!cts.IsCancellationRequested)
-                    {
-                        // Older server: assume the still-open socket is usable.
-                    }
+                    // Give the server a moment to reject a bad token/hello.
+                    // A rejected connection closes immediately and the receive
+                    // loop stops; a valid one stays open.
+                    await Task.Delay(500, cts.Token).ConfigureAwait(false);
                 }
 
                 lock (_gate)
@@ -202,7 +187,6 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                     _runCts = null;
                     _loopAlive = false;
                     _loop = null;
-                    _helloAck = null;
                 }
                 cts.Cancel();
                 cts.Dispose();
@@ -486,12 +470,6 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                     .ConfigureAwait(false);
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    if (IsCurrentRun(generation))
-                    {
-                        _helloAck?.TrySetException(new WebSocketException(
-                            $"Gateway handshake rejected ({result.CloseStatus}: " +
-                            $"{result.CloseStatusDescription}). Check the gateway token."));
-                    }
                     RaiseLog($"Server closed the WebSocket: {result.CloseStatus}");
                     break;
                 }
@@ -511,22 +489,8 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 }
                 var text = Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
                 stream.SetLength(0);
-                if (IsHelloAck(text))
-                {
-                    if (IsCurrentRun(generation))
-                    {
-                        _helloAck?.TrySetResult(true);
-                    }
-                    continue;
-                }
                 if (GatewayProtocolCodec.TryParseDownlink(text, out var command, out var error))
                 {
-                    // Any accepted mesh frame also proves the hello was
-                    // accepted (older servers do not send helloAck).
-                    if (IsCurrentRun(generation))
-                    {
-                        _helloAck?.TrySetResult(true);
-                    }
                     RaiseCommand(command, text);
                 }
                 else
@@ -541,27 +505,14 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
         catch (WebSocketException exception)
         {
-            if (IsCurrentRun(generation))
-            {
-                _helloAck?.TrySetException(exception);
-            }
             RaiseLog($"WebSocket closed: {exception.Message}");
         }
         catch (Exception exception)
         {
-            if (IsCurrentRun(generation))
-            {
-                _helloAck?.TrySetException(exception);
-            }
             RaiseLog($"WebSocket receive failed: {exception.Message}");
         }
         finally
         {
-            if (IsCurrentRun(generation))
-            {
-                _helloAck?.TrySetException(new WebSocketException(
-                    "The WebSocket disconnected before the gateway handshake completed."));
-            }
             // Release only this run's socket; a timed-out Stop can be followed
             // by a new Start before the old loop unwinds.
             DisposeSocketIfCurrent(generation);
@@ -574,22 +525,6 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         lock (_gate)
         {
             return generation == _runGeneration;
-        }
-    }
-
-    private static bool IsHelloAck(string text)
-    {
-        try
-        {
-            using var document = JsonDocument.Parse(text);
-            return document.RootElement.ValueKind == JsonValueKind.Object &&
-                   document.RootElement.TryGetProperty("type", out var type) &&
-                   string.Equals(type.GetString(), "helloAck",
-                       StringComparison.OrdinalIgnoreCase);
-        }
-        catch (JsonException)
-        {
-            return false;
         }
     }
 

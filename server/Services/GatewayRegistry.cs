@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading.Channels;
 using BalloonMesh.Server.Hubs;
@@ -26,10 +27,8 @@ public sealed class GatewayClient
 
     public string Id { get; }
     public Channel<DownlinkCommand> Commands { get; }
-    /// <summary>Commands a superseded writer must deliver before new work.</summary>
-    public ConcurrentQueue<DownlinkCommand> Requeue { get; } = new();
-    /// <summary>Newer channel command held while an older requeued one is returned.</summary>
-    public DownlinkCommand? PendingCommand { get; set; }
+    public WebSocket? CurrentSocket { get; set; }
+    public bool WriterBusy { get; set; }
     public bool WebSocketConnected { get; set; }
     public bool HasWebSocket { get; set; }
     public bool HttpPolling { get; set; }
@@ -43,7 +42,7 @@ public sealed class GatewayClient
     public int SpoolPending { get; set; }
     public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
     public int PendingCommands =>
-        (Commands.Reader.CanCount ? Commands.Reader.Count : 0) + Requeue.Count;
+        (Commands.Reader.CanCount ? Commands.Reader.Count : 0) + (WriterBusy ? 1 : 0);
 
     public long BumpWebSocketGeneration() =>
         Interlocked.Increment(ref _webSocketGeneration);
@@ -77,16 +76,13 @@ public sealed class GatewayRegistry
         return client;
     }
 
-    public (long Generation, Task? PreviousWriter, TaskCompletionSource<bool> WriterCompletion)
-        AttachWebSocket(string id, string? remote, string? firmware,
-            bool provisioned, int spoolPending, CancellationTokenSource lifetime)
+    public long AttachWebSocket(string id, string? remote, string? firmware,
+        bool provisioned, int spoolPending, WebSocket socket,
+        CancellationTokenSource lifetime)
     {
         var client = GetOrRegister(id, firmware);
         long generation;
         CancellationTokenSource? previous;
-        Task? previousWriter;
-        var writerCompletion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
         lock (client.ConnectionGate)
         {
             // Bump first: the old handler's detach/state callbacks must see a
@@ -94,14 +90,7 @@ public sealed class GatewayRegistry
             generation = client.BumpWebSocketGeneration();
             previous = client.WebSocketLifetime;
             client.WebSocketLifetime = lifetime;
-            previousWriter = client.WebSocketWriter;
-            // Publish a completion for this writer before the handler starts
-            // it, so a reconnect in the startup window still has something to
-            // await.  Chain the previous writer too, covering a connection
-            // that exits before its own writer ever starts.
-            client.WebSocketWriter = previousWriter is null
-                ? writerCompletion.Task
-                : Task.WhenAll(previousWriter, writerCompletion.Task);
+            client.CurrentSocket = socket;
             client.Provisioned = provisioned;
             client.ProvisionedReported = true;
             client.SpoolPending = spoolPending;
@@ -109,8 +98,8 @@ public sealed class GatewayRegistry
             client.HasWebSocket = true;
             client.Remote = remote;
         }
-        // Retire the previous connection so a half-open socket cannot keep
-        // draining the shared command channel.
+        // Stop the previous receive loop; the single writer survives and will
+        // pick up the new CurrentSocket.
         if (previous is not null)
         {
             try
@@ -123,7 +112,17 @@ public sealed class GatewayRegistry
             }
         }
         _ = NotifyChangedAsync();
-        return (generation, previousWriter, writerCompletion);
+        return generation;
+    }
+
+    /// <summary>Starts the single persistent writer for this gateway once.</summary>
+    public void EnsureWebSocketWriter(string id, Func<Task> factory)
+    {
+        var client = GetOrRegister(id);
+        lock (client.ConnectionGate)
+        {
+            client.WebSocketWriter ??= factory();
+        }
     }
 
     public async Task DetachWebSocketAsync(string id, long generation)
@@ -134,7 +133,8 @@ public sealed class GatewayRegistry
             {
                 if (client.WebSocketGeneration == generation)
                 {
-                    // Only the current connection may clear the flag.
+                    // Only the current connection may clear the socket/flag.
+                    client.CurrentSocket = null;
                     client.WebSocketConnected = false;
                     client.LastSeen = DateTimeOffset.UtcNow;
                 }
@@ -291,10 +291,6 @@ public sealed class GatewayRegistry
     public bool TryReadCommand(string id, out DownlinkCommand? command)
     {
         var client = GetOrRegister(id);
-        if (TakePendingOrRequeued(client, out command))
-        {
-            return true;
-        }
         return client.Commands.Reader.TryRead(out command);
     }
 
@@ -302,10 +298,6 @@ public sealed class GatewayRegistry
         CancellationToken cancellationToken)
     {
         var client = GetOrRegister(id);
-        if (TakePendingOrRequeued(client, out var pending))
-        {
-            return pending;
-        }
         if (waitMs <= 0)
         {
             return client.Commands.Reader.TryRead(out var immediate) ? immediate : null;
@@ -314,38 +306,12 @@ public sealed class GatewayRegistry
         timeout.CancelAfter(Math.Clamp(waitMs, 0, 30_000));
         try
         {
-            var command = await client.Commands.Reader.ReadAsync(timeout.Token);
-            if (client.Requeue.TryDequeue(out var requeued))
-            {
-                // Return the older requeued command first; keep the newer
-                // channel command for the next read.
-                client.PendingCommand = command;
-                return requeued;
-            }
-            return command;
+            return await client.Commands.Reader.ReadAsync(timeout.Token);
         }
         catch (OperationCanceledException)
         {
             return null;
         }
-    }
-
-    private static bool TakePendingOrRequeued(GatewayClient client,
-        out DownlinkCommand? command)
-    {
-        if (client.PendingCommand is { } pending)
-        {
-            client.PendingCommand = null;
-            command = pending;
-            return true;
-        }
-        if (client.Requeue.TryDequeue(out var requeued))
-        {
-            command = requeued;
-            return true;
-        }
-        command = null;
-        return false;
     }
 
     public IReadOnlyList<GatewayDto> Snapshot() =>

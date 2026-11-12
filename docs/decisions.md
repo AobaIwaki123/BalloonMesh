@@ -82,7 +82,6 @@
 - HTTP downlink: `GET /api/gateway/{id}/commands?waitMs=...`
 - WebSocket: `/ws/gateway`
   - hello: `{"type":"hello","gatewayId":"gw-01","firmware":"0.1.0","token":"...","provisioned":true,"spoolPending":0}`
-  - hello ack: `{"type":"helloAck","gatewayId":"gw-01"}`（トークン拒否時は hello 直後に close。デバッグツールは ack を待って接続成否を判定）
   - uplink: `{"type":"mesh","src":257,"dst":49169,"opcode":...,"payload":"...HEX...","rssi":-55,"ttl":7,"ageMs":0}`（`49169` = `0xC011`、ゲートウェイ向けテレメトリグループ。`ageMs` は spool 内で待った時間）
   - downlink: `{"type":"mesh","dst":...,"opcode":...,"payload":"...HEX...","ttl":7}`
 

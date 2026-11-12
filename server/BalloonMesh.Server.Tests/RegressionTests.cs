@@ -1,3 +1,4 @@
+using System.Net.WebSockets;
 using BalloonMesh.Protocol;
 using BalloonMesh.Server.Models;
 using BalloonMesh.Server.Services;
@@ -280,13 +281,13 @@ public sealed class RegressionTests
     {
         var registry = new GatewayRegistry(new RecordingMonitorEvents());
         var generation = registry.AttachWebSocket("gw-test", null, "0.1.0",
-            provisioned: false, spoolPending: 0, new CancellationTokenSource());
+            provisioned: false, spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
         var command = new DownlinkCommand(0xC010, 1, [1], 7);
 
         Assert.Equal(0, registry.Broadcast(command));
 
-        await registry.DetachWebSocketAsync("gw-test", generation.Generation);
-        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new CancellationTokenSource());
+        await registry.DetachWebSocketAsync("gw-test", generation);
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
         Assert.Equal(1, registry.Broadcast(command));
     }
 
@@ -295,11 +296,11 @@ public sealed class RegressionTests
     {
         var registry = new GatewayRegistry(new RecordingMonitorEvents());
         var generation = registry.AttachWebSocket("gw-test", null, "0.1.0",
-            provisioned: true, spoolPending: 0, new CancellationTokenSource());
+            provisioned: true, spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
         var command = new DownlinkCommand(0xC010, 1, [1], 7);
         Assert.Equal(1, registry.Broadcast(command));
 
-        await registry.DetachWebSocketAsync("gw-test", generation.Generation);
+        await registry.DetachWebSocketAsync("gw-test", generation);
 
         Assert.Equal(0, registry.Broadcast(command));
     }
@@ -322,12 +323,12 @@ public sealed class RegressionTests
     {
         var registry = new GatewayRegistry(new RecordingMonitorEvents());
         var oldGeneration = registry.AttachWebSocket("gw-test", null, "0.1.0",
-            provisioned: true, spoolPending: 0, new CancellationTokenSource());
+            provisioned: true, spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
         registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true,
-            spoolPending: 0, new CancellationTokenSource());
+            spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
 
         registry.UpdateRuntimeState("gw-test", provisioned: false, spoolPending: 9,
-            oldGeneration.Generation);
+            oldGeneration);
 
         var gateway = Assert.Single(registry.Snapshot());
         Assert.True(gateway.Provisioned);
@@ -339,10 +340,10 @@ public sealed class RegressionTests
     {
         var registry = new GatewayRegistry(new RecordingMonitorEvents());
         var oldGeneration = registry.AttachWebSocket("gw-test", null, "0.1.0",
-            provisioned: true, spoolPending: 0, new CancellationTokenSource());
-        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new CancellationTokenSource());
+            provisioned: true, spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
+        registry.AttachWebSocket("gw-test", null, "0.1.0", provisioned: true, spoolPending: 0, new ClientWebSocket(), new CancellationTokenSource());
 
-        await registry.DetachWebSocketAsync("gw-test", oldGeneration.Generation);
+        await registry.DetachWebSocketAsync("gw-test", oldGeneration);
 
         var gateway = Assert.Single(registry.Snapshot());
         Assert.True(gateway.WebSocket);

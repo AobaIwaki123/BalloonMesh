@@ -23,8 +23,6 @@ public static class GatewayWebSocket
         string? gatewayId = null;
         long connectionGeneration = 0;
         CancellationTokenSource? connectionLifetime = null;
-        Task? previousWriter = null;
-        TaskCompletionSource<bool>? writerCompletion = null;
         try
         {
             var hello = await ReceiveTextAsync(socket, linked.Token);
@@ -60,16 +58,14 @@ public static class GatewayWebSocket
                 {
                     connectionLifetime = CancellationTokenSource.CreateLinkedTokenSource(
                         linked.Token);
-                    var attached = registry.AttachWebSocket(
+                    connectionGeneration = registry.AttachWebSocket(
                         gatewayId,
                         remote ?? context.Connection.RemoteIpAddress?.ToString(),
                         firmware,
                         provisioned,
                         spoolPending,
+                        socket,
                         connectionLifetime);
-                    connectionGeneration = attached.Generation;
-                    previousWriter = attached.PreviousWriter;
-                    writerCompletion = attached.WriterCompletion;
                 }
             }
             catch (JsonException exception)
@@ -88,81 +84,60 @@ public static class GatewayWebSocket
             }
 
             var connectionToken = connectionLifetime?.Token ?? linked.Token;
-            // Explicit acknowledgement so a client can distinguish "connected
-            // and accepted" from "connected, then rejected after hello".  Real
-            // gateways ignore unknown message types.
-            var ack = JsonSerializer.SerializeToUtf8Bytes(new
-            {
-                type = "helloAck",
-                gatewayId
-            }, Json);
-            await socket.SendAsync(ack, WebSocketMessageType.Text, true, connectionToken);
-
             var client = registry.GetOrRegister(gatewayId);
-            var writer = WriteCommandsAsync(socket, client, connectionToken, logger,
-                connectionGeneration, previousWriter);
-            try
+            // One writer per gateway.  It survives reconnects and always sends
+            // to CurrentSocket, so commands keep their order and are retried
+            // after a socket failure instead of being handed between writers.
+            registry.EnsureWebSocketWriter(gatewayId,
+                () => Task.Run(() => WriteCommandsLoopAsync(client, logger)));
+
+            while (socket.State == WebSocketState.Open &&
+                   !connectionToken.IsCancellationRequested)
             {
-                while (socket.State == WebSocketState.Open &&
-                       !connectionToken.IsCancellationRequested)
+                var text = await ReceiveTextAsync(socket, connectionToken);
+                if (text is null)
                 {
-                    var text = await ReceiveTextAsync(socket, connectionToken);
-                    if (text is null)
-                    {
-                        break;
-                    }
-                    registry.Touch(gatewayId, webSocket: true);
-                    try
-                    {
-                        using var document = JsonDocument.Parse(text);
-                        var root = document.RootElement;
-                        var messageType = ReadString(root, "type");
-                        if (string.Equals(messageType, "mesh", StringComparison.OrdinalIgnoreCase))
-                        {
-                            var message = JsonSerializer.Deserialize<GatewayEventDto>(text, Json);
-                            if (message is not null)
-                            {
-                                router.Handle(message, gatewayId);
-                            }
-                        }
-                        else if (string.Equals(messageType, "hello",
-                                     StringComparison.OrdinalIgnoreCase) ||
-                                 string.Equals(messageType, "state",
-                                     StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Readiness can change after the initial hello (for
-                            // example when provisioning or AppKey binding
-                            // completes), so accept later status updates too.
-                            bool? provisioned = root.TryGetProperty("provisioned",
-                                out var prov)
-                                ? prov.ValueKind == JsonValueKind.True
-                                : null;
-                            var spool = root.TryGetProperty("spoolPending", out var spoolValue) &&
-                                        spoolValue.TryGetInt32(out var spoolCount)
-                                ? spoolCount
-                                : (int?)null;
-                            registry.UpdateRuntimeState(gatewayId, provisioned, spool,
-                                connectionGeneration);
-                        }
-                    }
-                    catch (JsonException exception)
-                    {
-                        logger.LogWarning(exception, "Gateway {Gateway} sent malformed JSON", gatewayId);
-                    }
+                    break;
                 }
-            }
-            finally
-            {
-                linked.Cancel();
+                registry.Touch(gatewayId, webSocket: true);
                 try
                 {
-                    await writer;
+                    using var document = JsonDocument.Parse(text);
+                    var root = document.RootElement;
+                    var messageType = ReadString(root, "type");
+                    if (string.Equals(messageType, "mesh", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var message = JsonSerializer.Deserialize<GatewayEventDto>(text, Json);
+                        if (message is not null)
+                        {
+                            router.Handle(message, gatewayId);
+                        }
+                    }
+                    else if (string.Equals(messageType, "hello",
+                                 StringComparison.OrdinalIgnoreCase) ||
+                             string.Equals(messageType, "state",
+                                 StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Readiness can change after the initial hello (for
+                        // example when provisioning or AppKey binding
+                        // completes), so accept later status updates too.
+                        bool? provisioned = root.TryGetProperty("provisioned",
+                            out var prov)
+                            ? prov.ValueKind == JsonValueKind.True
+                            : null;
+                        var spool = root.TryGetProperty("spoolPending", out var spoolValue) &&
+                                    spoolValue.TryGetInt32(out var spoolCount)
+                            ? spoolCount
+                            : (int?)null;
+                        registry.UpdateRuntimeState(gatewayId, provisioned, spool,
+                            connectionGeneration);
+                    }
                 }
-                catch (OperationCanceledException)
+                catch (JsonException exception)
                 {
-                    // expected on disconnect
+                    logger.LogWarning(exception,
+                        "Gateway {Gateway} sent malformed JSON", gatewayId);
                 }
-                writerCompletion?.TrySetResult(true);
             }
         }
         catch (OperationCanceledException)
@@ -175,10 +150,6 @@ public static class GatewayWebSocket
         }
         finally
         {
-            writerCompletion?.TrySetResult(true);
-            // Detach even when the hello ack send failed before the command
-            // writer loop started, otherwise the registry keeps a dead
-            // WebSocket as a reachable gateway.
             if (connectionGeneration != 0 && !string.IsNullOrWhiteSpace(gatewayId))
             {
                 await registry.DetachWebSocketAsync(gatewayId, connectionGeneration);
@@ -198,54 +169,19 @@ public static class GatewayWebSocket
         }
     }
 
-    private static async Task WriteCommandsAsync(
-        WebSocket socket,
-        GatewayClient client,
-        CancellationToken cancellationToken,
-        ILogger logger,
-        long generation,
-        Task? previousWriter)
+    /// <summary>
+    /// Persistent writer: reads one command at a time and retries it on the
+    /// current socket until it is sent or the process stops.  Because there is
+    /// only one reader, command order is preserved across reconnects.
+    /// </summary>
+    private static async Task WriteCommandsLoopAsync(GatewayClient client, ILogger logger)
     {
-        try
+        while (true)
         {
-            if (previousWriter is not null)
+            var command = await client.Commands.Reader.ReadAsync();
+            client.WriterBusy = true;
+            try
             {
-                // The new writer must not overtake a command the old writer
-                // already dequeued; the old writer requeues it before exiting.
-                try
-                {
-                    // The previous lifetime was cancelled by AttachWebSocket,
-                    // so this should complete promptly; waiting is what keeps
-                    // command ordering intact.
-                    await previousWriter.WaitAsync(cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
-                }
-                catch (Exception exception)
-                {
-                    // A faulty predecessor must not stop the new writer from
-                    // draining the requeue.
-                    logger.LogDebug(exception,
-                        "Previous WebSocket writer for {Gateway} ended abnormally",
-                        client.Id);
-                }
-            }
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                if (!client.Requeue.TryDequeue(out var command))
-                {
-                    command = await client.Commands.Reader.ReadAsync(cancellationToken);
-                }
-                if (client.WebSocketGeneration != generation)
-                {
-                    // This writer belongs to a superseded connection.  Put the
-                    // command at the front of the next writer's queue.
-                    client.Requeue.Enqueue(command);
-                    break;
-                }
                 var body = new
                 {
                     type = "mesh",
@@ -255,34 +191,41 @@ public static class GatewayWebSocket
                     ttl = command.Ttl
                 };
                 var json = JsonSerializer.SerializeToUtf8Bytes(body, Json);
-                try
+                while (true)
                 {
-                    await socket.SendAsync(json, WebSocketMessageType.Text, true,
-                        cancellationToken);
-                }
-                catch (Exception exception) when (exception is OperationCanceledException or
-                                                  WebSocketException or ObjectDisposedException or
-                                                  InvalidOperationException)
-                {
-                    // The command was removed from the channel but never
-                    // written; preserve it for the next connection.
-                    client.Requeue.Enqueue(command);
-                    throw;
+                    WebSocket? socket;
+                    lock (client.ConnectionGate)
+                    {
+                        socket = client.WebSocketConnected ? client.CurrentSocket : null;
+                    }
+                    if (socket is null || socket.State != WebSocketState.Open)
+                    {
+                        await Task.Delay(200);
+                        continue;
+                    }
+                    try
+                    {
+                        using var sendTimeout = new CancellationTokenSource(
+                            TimeSpan.FromSeconds(5));
+                        await socket.SendAsync(json, WebSocketMessageType.Text, true,
+                            sendTimeout.Token);
+                        break;
+                    }
+                    catch (Exception exception) when (exception is WebSocketException or
+                                                      OperationCanceledException or
+                                                      ObjectDisposedException or
+                                                      InvalidOperationException)
+                    {
+                        logger.LogDebug(exception,
+                            "Gateway {Gateway} send failed; retrying", client.Id);
+                        await Task.Delay(200);
+                    }
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // expected on disconnect
-        }
-        catch (WebSocketException exception)
-        {
-            logger.LogInformation(exception, "Gateway command writer stopped");
-        }
-        catch (Exception exception) when (exception is ObjectDisposedException or
-                                          InvalidOperationException)
-        {
-            logger.LogInformation(exception, "Gateway command writer stopped");
+            finally
+            {
+                client.WriterBusy = false;
+            }
         }
     }
 
@@ -292,7 +235,8 @@ public static class GatewayWebSocket
             ? value.GetString()
             : null;
 
-    private static async Task<string?> ReceiveTextAsync(WebSocket socket, CancellationToken cancellationToken)
+    private static async Task<string?> ReceiveTextAsync(WebSocket socket,
+        CancellationToken cancellationToken)
     {
         var buffer = new byte[64 * 1024];
         using var stream = new MemoryStream();
