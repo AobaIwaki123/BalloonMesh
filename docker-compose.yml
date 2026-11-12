@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: balloonmesh
+      POSTGRES_USER: balloonmesh
+      POSTGRES_PASSWORD: balloonmesh
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U balloonmesh -d balloonmesh"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  server:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "5080:5080"
+    environment:
+      ConnectionStrings__BalloonMesh: "Host=postgres;Port=5432;Database=balloonmesh;Username=balloonmesh;Password=balloonmesh;Pooling=true;Maximum Pool Size=20"
+      ASPNETCORE_URLS: "http://+:5080"
+      Simulation__Enabled: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

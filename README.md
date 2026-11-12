@@ -58,7 +58,21 @@ git submodule update --init --recursive
 
 ## クイックスタート
 
-### 1. PostgreSQL
+### 0. Docker Compose での起動（推奨・最も簡単）
+
+ローカルの .NET 10 SDK や PostgreSQL の手動インストールを行わずに、Docker Compose でサーバとデータベースを一括起動できます。
+
+```bash
+docker compose up -d --build
+```
+
+- Web UI: <http://localhost:5080/>
+- ログ確認: `docker compose logs -f server`
+- 停止: `docker compose down`
+
+---
+
+### 1. PostgreSQL（ローカル起動の場合）
 
 ローカル PostgreSQL 16 を想定しています。開発用ロールと DB を作成します。
 
