@@ -7,6 +7,7 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -114,19 +115,22 @@ static void upload_events_task(void *argument) {
                                bm_gateway_mesh_is_ready() ? "true" : "false",
                                (unsigned)bm_gateway_spool_count());
         bool body_ok = written > 0 && (size_t)written < capacity;
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
         for (uint16_t i = 0; body_ok && i < count; ++i) {
             char hex[17];
+            uint32_t age_ms = now_ms - events[i].received_ms;
             hex_encode(events[i].payload, events[i].length, hex, sizeof(hex));
             size_t remaining = capacity - (size_t)written;
             int appended = snprintf(body + written, remaining,
                                 "%s{\"src\":%u,\"dst\":%u,\"opcode\":%lu,"
                                 "\"payload\":\"%s\",\"rssi\":%d,\"ttl\":%u,"
-                                "\"receivedMs\":%lu}",
+                                "\"receivedMs\":%lu,\"ageMs\":%lu}",
                                 i == 0 ? "" : ",",
                                 events[i].src, events[i].dst,
                                 (unsigned long)events[i].opcode, hex,
                                 events[i].rssi, events[i].ttl,
-                                (unsigned long)events[i].received_ms);
+                                (unsigned long)events[i].received_ms,
+                                (unsigned long)age_ms);
             if (appended < 0 || (size_t)appended >= remaining) {
                 body_ok = false;
                 break;

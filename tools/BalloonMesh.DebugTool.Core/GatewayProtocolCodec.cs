@@ -44,7 +44,8 @@ public static class GatewayProtocolCodec
             payload,
             rssi = message.Rssi,
             ttl = message.Ttl,
-            receivedMs = message.ReceivedMs
+            receivedMs = message.ReceivedMs,
+            ageMs = message.AgeMs
         }, Json);
     }
 

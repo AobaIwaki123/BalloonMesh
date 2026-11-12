@@ -114,6 +114,14 @@ void bm_neighbor_link_finish_collection(uint8_t batch_id) {
              count, (unsigned)((count + 1) / 2));
 }
 
+void bm_neighbor_link_abort_collection(void) {
+    if (xSemaphoreTake(s_state.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        bm_neighbor_end(&s_state.collector);
+        s_state.collecting = false;
+        xSemaphoreGive(s_state.lock);
+    }
+}
+
 void bm_neighbor_link_on_request(void) {
     if (xSemaphoreTake(s_state.lock, pdMS_TO_TICKS(20)) != pdTRUE) {
         return;

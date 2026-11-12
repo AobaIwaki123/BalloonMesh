@@ -39,6 +39,7 @@ public sealed class ShowRecoveryWorker : BackgroundService
         {
             _logger.LogWarning("{Count} queued show step(s) were already past and were marked expired", expired);
         }
+        RebuildSentEstimates(now);
         foreach (var step in _store.GetPendingShowSteps(now))
         {
             if (cancellationToken.IsCancellationRequested)
@@ -70,6 +71,32 @@ public sealed class ShowRecoveryWorker : BackgroundService
             _logger.LogInformation("recovered {Count} queued show step(s)", recovered);
         }
         return Task.FromResult(recovered);
+    }
+
+    private void RebuildSentEstimates(DateTimeOffset now)
+    {
+        var seeded = 0;
+        foreach (var step in _store.GetFutureShowSteps("sent", now))
+        {
+            try
+            {
+                var target = _fleet.ResolveTarget(step.TargetKind, step.Target);
+                var tick = BalloonProtocol.Tick40FromUnixMs(
+                    step.ExecuteAt.ToUnixTimeMilliseconds());
+                _dispatch.SeedSentReservation(target, tick);
+                seeded++;
+            }
+            catch (ArgumentException exception)
+            {
+                _logger.LogWarning("sent show step {Id} could not be restored: {Message}",
+                    step.Id, exception.Message);
+            }
+        }
+        if (seeded > 0)
+        {
+            _logger.LogInformation(
+                "restored {Count} already-sent show step(s) into queue estimates", seeded);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

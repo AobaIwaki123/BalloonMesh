@@ -167,16 +167,37 @@ public sealed class LedDispatchService
         return removed;
     }
 
+    /// <summary>
+    /// Rebuilds the estimate from a reservation that was already marked sent
+    /// before a server restart.  Without this the dispatcher assumes an empty
+    /// device queue and can overfill it after recovery.
+    /// </summary>
+    public void SeedSentReservation(TargetSpec target, ulong executeTick)
+    {
+        lock (_gate)
+        {
+            foreach (var balloon in target.Balloons)
+            {
+                var estimate = GetEstimate(balloon.MeshAddress);
+                if (!estimate.SentTicks.Contains(executeTick))
+                {
+                    estimate.SentTicks.Add(executeTick);
+                }
+                WriteEstimate(balloon.MeshAddress, estimate);
+            }
+        }
+    }
+
     public void NoteQueueStatus(ushort address, ushort count)
     {
         lock (_gate)
         {
             var estimate = GetEstimate(address);
-            // The device only reports threshold transitions.  A RECOVERED
-            // report means it is at or below the target depth again; keeping
-            // that value as a permanent floor would block all future dispatch
-            // (350 + 0 is never < 350).
-            estimate.ReportedCount = count <= TargetQueueDepth ? 0 : count;
+            // Keep the reported depth as-is.  Firmware now sends it
+            // periodically, so a value at the target is refreshed as the queue
+            // drains instead of becoming a permanent floor (or being assumed
+            // to be zero, which would overfill the device).
+            estimate.ReportedCount = count;
             WriteEstimate(address, estimate);
         }
     }

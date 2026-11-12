@@ -251,11 +251,12 @@ public sealed class GatewayRegistry
                     : client.LastSeen >= cutoff &&
                       (!client.ProvisionedReported || client.Provisioned))
                 .ToArray();
-            if (clients.Any(client => client.PendingCommands >= GatewayQueueCapacity))
-            {
-                return 0;
-            }
-            return clients.Count(client => client.Commands.Writer.TryWrite(command));
+            // One full gateway must not block delivery through the remaining
+            // gateways: they broadcast to the same mesh, so a healthy path can
+            // still cover the target.  Only fail when no client can accept it.
+            return clients.Count(client =>
+                client.PendingCommands < GatewayQueueCapacity &&
+                client.Commands.Writer.TryWrite(command));
         }
     }
 

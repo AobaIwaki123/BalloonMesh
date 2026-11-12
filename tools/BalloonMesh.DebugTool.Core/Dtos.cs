@@ -107,7 +107,8 @@ public sealed record GatewayEventInfo(
     string Payload,
     int Rssi,
     int Ttl,
-    long? ReceivedMs = null);
+    long? ReceivedMs = null,
+    int? AgeMs = null);
 
 /// <summary>One downlink mesh command received from the server.</summary>
 public sealed record GatewayCommandInfo(ushort Dst, uint Opcode, string Payload, int Ttl);

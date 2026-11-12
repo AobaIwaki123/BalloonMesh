@@ -8,6 +8,7 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -180,13 +181,15 @@ static void ws_sender_task(void *argument) {
             continue;
         }
         char hex[17];
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        uint32_t age_ms = now_ms - event.received_ms;
         hex_encode(event.payload, event.length, hex, sizeof(hex));
-        char json[320];
+        char json[352];
         int length = snprintf(json, sizeof(json),
                               "{\"type\":\"mesh\",\"src\":%u,\"dst\":%u,\"opcode\":%lu,"
-                              "\"payload\":\"%s\",\"rssi\":%d,\"ttl\":%u}",
+                              "\"payload\":\"%s\",\"rssi\":%d,\"ttl\":%u,\"ageMs\":%lu}",
                               event.src, event.dst, (unsigned long)event.opcode, hex,
-                              event.rssi, event.ttl);
+                              event.rssi, event.ttl, (unsigned long)age_ms);
         if (length > 0 && length < (int)sizeof(json)) {
             int sent = esp_websocket_client_send_text(s_client, json, length,
                                                       pdMS_TO_TICKS(3000));

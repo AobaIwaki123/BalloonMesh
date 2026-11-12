@@ -61,9 +61,13 @@ public sealed class RegressionTests
             BalloonProtocol.Tick40FromUnixMs(at.ToUnixTimeMilliseconds()), at, 1, 2, 3));
         Assert.Equal(0, await dispatch.TickAsync());
 
-        // RECOVERED reports can be exactly at the target depth; treating that
-        // number as a permanent floor would stop every future reservation.
+        // The device reports periodically, so a value at the target waits for
+        // the next report instead of either blocking forever or being treated
+        // as an empty queue.
         dispatch.NoteQueueStatus(0x0101, 350);
+        Assert.Equal(0, await dispatch.TickAsync());
+
+        dispatch.NoteQueueStatus(0x0101, 340);
         Assert.Equal(1, await dispatch.TickAsync());
         Assert.Equal(0, dispatch.PendingCount);
     }
@@ -155,6 +159,26 @@ public sealed class RegressionTests
 
         Assert.Equal(0, await services.Aggregator.ProcessDueAsync(services.Time.GetUtcNow()));
         Assert.Equal(history, services.Fleet.GetHistory(0x0101, 100).Count);
+    }
+
+    [Fact]
+    public async Task RecoverySeedsAlreadySentReservationsIntoTheEstimate()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var at = services.Time.GetUtcNow().AddMinutes(2);
+        var id = database.Store.AddShowStep("sent", "balloon", "0x0101", at,
+            1, 2, 3, "sent");
+
+        var registry = new GatewayRegistry(services.Events);
+        var dispatcher = new LedDispatchService(registry, services.Fleet, database.Store,
+            services.Events, services.Time, NullLogger<LedDispatchService>.Instance);
+        var worker = new ShowRecoveryWorker(database.Store, services.Fleet, dispatcher,
+            services.Time, NullLogger<ShowRecoveryWorker>.Instance);
+
+        Assert.Equal(0, await worker.RecoverAsync());
+        Assert.Equal(1, dispatcher.GetEstimatedCount(0x0101));
+        Assert.Equal("sent", database.Store.GetShowStep(id)!.Status);
     }
 
     [Fact]

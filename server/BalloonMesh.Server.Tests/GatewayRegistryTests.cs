@@ -14,8 +14,8 @@ public sealed class GatewayRegistryTests
         var first = new DownlinkCommand(1, 1, [1], 7);
         for (var i = 0; i < 2048; i++) Assert.Equal(1, registry.Broadcast(first));
         var second = registry.GetOrRegister("gw-second");
-        Assert.Equal(0, registry.Broadcast(new DownlinkCommand(2, 1, [2], 7)));
-        Assert.Equal(0, second.PendingCommands);
+        Assert.Equal(1, registry.Broadcast(new DownlinkCommand(2, 1, [2], 7)));
+        Assert.Equal(1, second.PendingCommands);
         Assert.Equal(first, await registry.ReadCommandAsync("gw-test", 0, default));
     }
 
