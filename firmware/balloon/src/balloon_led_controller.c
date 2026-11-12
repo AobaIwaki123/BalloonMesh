@@ -28,7 +28,6 @@ typedef struct {
     uint8_t status_kind;
     uint16_t status_count;
     uint32_t last_status_attempt_ms;
-    uint32_t last_periodic_status_ms;
 } bm_led_controller_t;
 
 static bm_led_controller_t s_controller;
@@ -152,16 +151,6 @@ static void led_task(void *argument) {
 
             uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
             retry_pending_status_locked(now_ms);
-            /* Report the actual depth periodically.  Without this a server
-             * restart (or a lost transition packet) leaves its estimate stale
-             * until the device happens to cross 401/350 again. */
-            if ((uint32_t)(now_ms - s_controller.last_periodic_status_ms) >= 10000u) {
-                s_controller.last_periodic_status_ms = now_ms;
-                send_status_locked(
-                    s_controller.monitor.near_full ? BM_QUEUE_STATUS_NEAR_FULL
-                                                   : BM_QUEUE_STATUS_RECOVERED,
-                    s_controller.queue.count);
-            }
             if (s_controller.dirty &&
                 (uint32_t)(now_ms - s_controller.last_save_ms) >= 2000u) {
                 snapshot = (bm_led_queue_t *)malloc(sizeof(*snapshot));
@@ -203,10 +192,14 @@ void bm_led_controller_init(bm_queue_status_sender_t sender) {
     s_save_lock = xSemaphoreCreateMutex();
     s_controller.sender = sender;
     s_controller.last_save_ms = (uint32_t)(esp_timer_get_time() / 1000);
-    s_controller.last_periodic_status_ms = s_controller.last_save_ms;
-    /* Announce a restored near-full queue immediately; if the mesh is not
-     * bound yet the controller keeps the status pending and retries. */
-    refresh_monitor_locked();
+    /* One boot-time status (not a periodic stream): it tells the server the
+     * restored queue depth.  If the mesh is not bound yet, the controller
+     * keeps it pending and retries.  Later updates are transition-driven. */
+    (void)bm_queue_monitor_update(&s_controller.monitor, s_controller.queue.count);
+    send_status_locked(
+        s_controller.monitor.near_full ? BM_QUEUE_STATUS_NEAR_FULL
+                                       : BM_QUEUE_STATUS_RECOVERED,
+        s_controller.queue.count);
     s_controller.initialized = true;
     xTaskCreate(led_task, "led_queue", 4096, NULL, 6, NULL);
     if (s_save_lock != NULL) {

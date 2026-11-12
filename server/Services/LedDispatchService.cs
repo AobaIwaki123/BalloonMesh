@@ -162,7 +162,13 @@ public sealed class LedDispatchService
             foreach (var address in targets)
             {
                 var estimate = GetEstimate(address);
-                estimate.SentTicks.RemoveAll(tick => tick == executeTick);
+                var removedTicks = estimate.SentTicks.RemoveAll(tick => tick == executeTick);
+                if (removedTicks > 0 && estimate.ReportedCount > 0)
+                {
+                    // The device tombstone removes the reservation, so the
+                    // reported depth no longer includes it.
+                    estimate.ReportedCount--;
+                }
                 WriteEstimate(address, estimate);
             }
         }

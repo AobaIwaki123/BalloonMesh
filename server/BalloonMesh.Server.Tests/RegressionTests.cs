@@ -94,6 +94,24 @@ public sealed class RegressionTests
     }
 
     [Fact]
+    public void CancellingASentReservationReducesTheReportedDepth()
+    {
+        using var database = new TemporaryDatabase();
+        var services = CreateServices(database);
+        var at = services.Time.GetUtcNow().AddMinutes(1);
+        var tick = BalloonProtocol.Tick40FromUnixMs(at.ToUnixTimeMilliseconds());
+        services.Dispatch.SeedSentReservations(
+        [
+            (services.Fleet.ResolveTarget("balloon", "0x0101"), tick)
+        ]);
+        services.Dispatch.NoteQueueStatus(0x0101, 10);
+
+        services.Dispatch.NoteCancel([0x0101], tick);
+
+        Assert.Equal(9, services.Dispatch.GetEstimatedCount(0x0101));
+    }
+
+    [Fact]
     public void CancelRemovesTheMatchingPendingReservation()
     {
         using var database = new TemporaryDatabase();

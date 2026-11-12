@@ -96,7 +96,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、47 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、48 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 
@@ -264,7 +264,7 @@ pio run -t upload
 - 実行済み・cutoff 以前・キャンセル済みの遅延到着を拒否
 - 512 件満杯時は「最も遠い未来」を追い出し、近い予約を保護
 - cutoff は単調増加、等しい/古い RESET を無視
-- 401 件で `NEAR_FULL`、350 件で `RECOVERED` を通知（ヒステリシス）し、10 秒ごとに実件数も送信
+- 起動時と 401 件 `NEAR_FULL` / 350 件 `RECOVERED` の遷移時にキュー件数を通知（周期的な送信はしない）
 - 前方ジャンプ再同期では通過した予約を実行せず破棄
 - 未同期でも予約を保持し、初回同期で過去分を破棄
 - LED キュー・cutoff・現在色を NVS に保存し、再起動時に復元（2 秒 debounce）
