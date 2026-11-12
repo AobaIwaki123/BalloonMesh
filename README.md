@@ -80,45 +80,32 @@ SIMULATION_ENABLED=false docker compose up -d --build
 
 常時接続 WebSocket (`/ws/gateway`, `/hubs/monitor`) や測位バッチ集約ワーカーが稼働するため、Vercel 等のサーバーレスではなく常時起動 VPS（Amazon Lightsail 等）でのホスティングを推奨します。手元から 1 コマンドで作成・更新・破棄ができるスクリプトを用意しています。
 
-#### 初回作成 ＆ 自動デプロイ (`scripts/lightsail-init.sh`)
-AWS CLI が設定された環境で以下を実行すると、Lightsail インスタンス作成・ポート開放・Docker 起動まで全自動で行われます：
+#### デプロイ（新規作成または差分更新） (`scripts/lightsail-deploy.sh`)
+AWS CLI が設定された環境でスクリプトを実行します。**Lightsail インスタンスが存在しない場合は自動新規作成（ポート開放・初回デプロイ含む）され、既に存在する場合は差分のみを高速反映**します：
 
 ```bash
-# 構文: ./scripts/lightsail-init.sh [INSTANCE_NAME] [SSH_KEY_PATH] [BUNDLE_ID] [--demo|--prod]
-# 例1: デモモード（小規模検証、デフォルト）
-./scripts/lightsail-init.sh balloonmesh-server ~/.ssh/your-key.pem small_3_0 --demo
+# デモモードでデプロイ（デフォルト: 2GB RAM プラン、仮想50台シミュレーション）
+./scripts/lightsail-deploy.sh
 
-# 例2: 本番実機モード（$7/月の1GBプランで起動）
-./scripts/lightsail-init.sh balloonmesh-server ~/.ssh/your-key.pem micro_3_0 --prod
+# 本番・実機モードでデプロイ（シミュレーション停止、物理ESP32待受）
+./scripts/lightsail-deploy.sh --prod
+
+# $7/月の最小プラン (1GB RAM) で新規作成してデプロイ
+./scripts/lightsail-deploy.sh --bundle micro_3_0
 ```
 
-| 引数 | 説明 | デフォルト値 |
+| オプション | 説明 | デフォルト値 |
 |---|---|---|
-| `INSTANCE_NAME` | Lightsail インスタンス名 | `balloonmesh-server` |
-| `SSH_KEY_PATH` | SSH 秘密鍵のパス | `~/.ssh/` 下の既存鍵を自動検出 |
-| `BUNDLE_ID` | インスタンスプラン（`small_3_0`: 2GB RAM / $12/月, `micro_3_0`: 1GB RAM / $7/月） | `small_3_0` |
 | `--demo` / `--prod` | 動作モード（`--demo`: 仮想50台シミュレーション, `--prod`: 本番実機待受） | `--demo` |
-
-#### 更新の再デプロイ (`scripts/lightsail-deploy.sh`)
-手元の変更差分を転送し、コンテナを再ビルド・即時反映します。モードの切り替えも可能です：
-
-```bash
-# 構文: ./scripts/lightsail-deploy.sh <LIGHTSAIL_IP> [SSH_KEY_PATH] [--demo|--prod]
-
-# デモモードで差分更新
-./scripts/lightsail-deploy.sh 57.xxx.xxx.xxx ~/.ssh/your-key.pem --demo
-
-# 本番実機接続モードに切り替えて差分更新
-./scripts/lightsail-deploy.sh 57.xxx.xxx.xxx ~/.ssh/your-key.pem --prod
-```
-
-*(環境変数 `export LIGHTSAIL_HOST=57.xxx.xxx.xxx` および `export LIGHTSAIL_KEY=~/.ssh/your-key.pem` を設定しておくと、`./scripts/lightsail-deploy.sh --prod` だけで実行可能です)*
+| `--bundle <ID>` | プラン指定（`small_3_0`: 2GB/$12/月, `micro_3_0`: 1GB/$7/月） | `small_3_0` |
+| `--key <PATH>` | SSH 秘密鍵パス（未指定時は `~/.ssh/` から自動検出） | 自動検出 |
+| `--name <NAME>` | Lightsail インスタンス名 | `balloonmesh-server` |
 
 #### インスタンスの破棄（課金停止） (`scripts/lightsail-destroy.sh`)
 検証完了後、1 コマンドでインスタンス・ディスク・キーペアを完全削除して課金を停止できます：
 
 ```bash
-./scripts/lightsail-destroy.sh balloonmesh-server
+./scripts/lightsail-destroy.sh
 ```
 
 ---
