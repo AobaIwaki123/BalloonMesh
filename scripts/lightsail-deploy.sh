@@ -200,7 +200,7 @@ rsync -avz \
 
 # 3. コンテナのビルドと起動
 echo "==> コンテナをビルド・起動しています (SIMULATION_ENABLED=${SIMULATION_ENABLED})..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${HOST}" "cd ${REMOTE_DIR} && export SIMULATION_ENABLED=${SIMULATION_ENABLED} GATEWAY_TOKEN='${GATEWAY_TOKEN}' && docker compose up -d --build"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${HOST}" "cd ${REMOTE_DIR} && sudo SIMULATION_ENABLED=${SIMULATION_ENABLED} GATEWAY_TOKEN='${GATEWAY_TOKEN}' docker compose up -d --build"
 
 # 4. ヘルスチェック
 echo "==> デプロイの疎通確認中..."
