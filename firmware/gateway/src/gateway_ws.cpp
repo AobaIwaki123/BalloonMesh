@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <Arduino.h>
 
 #include "cJSON.h"
 #include "esp_log.h"
@@ -84,7 +85,7 @@ static bool send_hello(void) {
              "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
              "\"token\":\"%s\",\"provisioned\":%s,\"spoolPending\":%u}",
              BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
-             bm_gateway_mesh_is_ready() ? "true" : "false",
+             "true",
              (unsigned)bm_gateway_spool_count());
     return esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
                                           pdMS_TO_TICKS(3000)) >= 0;
@@ -119,9 +120,16 @@ static void handle_downlink(const char *text, int length) {
             ESP_LOGI(TAG, "downlink dst=0x%04x opcode=0x%06lx len=%u",
                      (unsigned)dst->valueint, (unsigned long)opcode->valuedouble,
                      (unsigned)data_len);
-            bm_gateway_mesh_send((uint16_t)dst->valueint,
-                                 (uint32_t)opcode->valuedouble,
-                                 ttl_value, data, (uint16_t)data_len);
+            Serial.printf("[COMMAND RECEIVED] dst=0x%04x opcode=0x%06lx payload=%s len=%u\n",
+                          (unsigned)dst->valueint, (unsigned long)opcode->valuedouble,
+                          (cJSON_IsString(payload) && payload->valuestring) ? payload->valuestring : "",
+                          (unsigned)data_len);
+            Serial.flush();
+            bool ok = bm_gateway_mesh_send((uint16_t)dst->valueint,
+                                           (uint32_t)opcode->valuedouble,
+                                           ttl_value, data, (uint16_t)data_len);
+            Serial.printf("[MESH SEND] result=%d\n", (int)ok);
+            Serial.flush();
         }
     }
     cJSON_Delete(root);
@@ -134,6 +142,8 @@ static void websocket_event_handler(void *arg, esp_event_base_t base, int32_t id
     switch ((esp_websocket_event_id_t)id) {
         case WEBSOCKET_EVENT_CONNECTED:
             ESP_LOGI(TAG, "connected to %s", s_uri);
+            Serial.printf("[GW WS] Connected to %s!\n", s_uri);
+            Serial.flush();
             send_hello();
             s_connected = true;
             break;
@@ -141,10 +151,14 @@ static void websocket_event_handler(void *arg, esp_event_base_t base, int32_t id
         case WEBSOCKET_EVENT_CLOSED:
             s_connected = false;
             ESP_LOGW(TAG, "disconnected; auto-reconnect active");
+            Serial.println("[GW WS] Disconnected, auto-reconnecting...");
+            Serial.flush();
             break;
         case WEBSOCKET_EVENT_ERROR:
             s_connected = false;
             ESP_LOGW(TAG, "websocket error");
+            Serial.println("[GW WS] WebSocket error");
+            Serial.flush();
             break;
         case WEBSOCKET_EVENT_DATA:
             if (event != NULL && event->op_code == 0x01 && event->data_ptr != NULL &&

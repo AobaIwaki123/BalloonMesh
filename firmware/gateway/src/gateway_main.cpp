@@ -19,6 +19,15 @@
 
 static const char *TAG = "gateway";
 
+static int vprintf_to_serial(const char *fmt, va_list args) {
+    char buf[256];
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    if (len > 0) {
+        Serial.print(buf);
+    }
+    return len;
+}
+
 /// HTTP/HTTPS transport selection.  Define BM_TLS_CA_CERT in the build flags
 /// for certificate validation; without it the prototype uses setInsecure().
 class GatewayHttpClient {
@@ -254,6 +263,8 @@ static void wifi_task(void *argument) {
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
             ESP_LOGI(TAG, "connecting Wi-Fi SSID=%s", BM_GATEWAY_WIFI_SSID);
+            Serial.printf("[GW] connecting Wi-Fi SSID=%s\n", BM_GATEWAY_WIFI_SSID);
+            Serial.flush();
             WiFi.begin(BM_GATEWAY_WIFI_SSID, BM_GATEWAY_WIFI_PASSWORD);
             uint32_t start = millis();
             while (WiFi.status() != WL_CONNECTED &&
@@ -263,8 +274,12 @@ static void wifi_task(void *argument) {
             if (WiFi.status() == WL_CONNECTED) {
                 ESP_LOGI(TAG, "Wi-Fi connected, IP=%s",
                          WiFi.localIP().toString().c_str());
+                Serial.printf("[GW] Wi-Fi connected! IP=%s\n", WiFi.localIP().toString().c_str());
+                Serial.flush();
             } else {
                 ESP_LOGW(TAG, "Wi-Fi connection failed");
+                Serial.println("[GW] Wi-Fi connection failed, retrying...");
+                Serial.flush();
             }
         }
         vTaskDelay(pdMS_TO_TICKS(5000));
@@ -273,9 +288,15 @@ static void wifi_task(void *argument) {
 
 void setup() {
     Serial.begin(115200);
-    delay(200);
-    ESP_LOGI(TAG, "BalloonMesh gateway %s firmware %s", BM_GATEWAY_ID,
-             BM_FIRMWARE_VERSION);
+    delay(500);
+    esp_log_set_vprintf(vprintf_to_serial);
+    Serial.println("[GW] setup starting...");
+    Serial.flush();
+
+#if defined(BM_DEV_AUTO_PROV) && BM_DEV_AUTO_PROV
+    Serial.println("[GW] BM_DEV_AUTO_PROV enabled: erasing NVS");
+    ESP_ERROR_CHECK(nvs_flash_erase());
+#endif
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -283,16 +304,28 @@ void setup() {
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+    Serial.println("[GW] NVS initialized");
+    Serial.flush();
 
-    bm_gateway_spool_init();
-    bm_gateway_mesh_init();
     xTaskCreate(wifi_task, "gateway_wifi", 4096, NULL, 5, NULL);
+    Serial.println("[GW] wifi_task started");
+    Serial.flush();
+
 #if defined(BM_GATEWAY_USE_WEBSOCKET) && BM_GATEWAY_USE_WEBSOCKET
     bm_gateway_ws_start();
-#else
-    xTaskCreate(upload_events_task, "gateway_upload", 6144, NULL, 4, NULL);
-    xTaskCreate(poll_commands_task, "gateway_poll", 8192, NULL, 4, NULL);
+    Serial.println("[GW] websocket started");
+    Serial.flush();
 #endif
+
+    bm_gateway_spool_init();
+    Serial.println("[GW] spool initialized");
+    Serial.flush();
+
+    Serial.println("[GW] calling bm_gateway_mesh_init...");
+    Serial.flush();
+    bm_gateway_mesh_init();
+    Serial.println("[GW] mesh initialized");
+    Serial.flush();
 }
 
 void loop() {

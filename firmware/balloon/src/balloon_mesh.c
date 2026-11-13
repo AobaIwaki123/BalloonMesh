@@ -25,6 +25,7 @@
 #include "balloon_time_link.h"
 #include "bm_config.h"
 #include "bm_device_id.h"
+#include "bm_dev_auto_prov.h"
 
 static const char *TAG = "balloon-mesh";
 
@@ -538,6 +539,9 @@ static void custom_model_cb(esp_ble_mesh_model_cb_event_t event,
     const uint8_t *data = param->model_operation.msg;
     uint16_t length = param->model_operation.length;
 
+    ESP_LOGI(TAG, "rx opcode=0x%06lx src=0x%04x dst=0x%04x len=%u",
+             (unsigned long)opcode, ctx->addr, ctx->recv_dst, (unsigned)length);
+
     if (opcode == BM_VENDOR_OPCODE(BM_OP_NEIGHBOR_REQUEST)) {
         bm_neighbor_link_on_request();
         return;
@@ -558,6 +562,7 @@ static void custom_model_cb(esp_ble_mesh_model_cb_event_t event,
 }
 
 void bm_balloon_mesh_init(void) {
+    ESP_LOGI(TAG, "step 1: event group and mutex");
     s_state_events = xEventGroupCreateStatic(&s_state_events_storage);
     if (s_state_events == NULL) {
         ESP_LOGE(TAG, "mesh state event group creation failed");
@@ -568,6 +573,7 @@ void bm_balloon_mesh_init(void) {
         ESP_LOGE(TAG, "mesh state mutex creation failed");
         return;
     }
+    ESP_LOGI(TAG, "step 2: timers");
     const esp_timer_create_args_t bind_retry_args = {
         .callback = bind_retry_timer_cb,
         .arg = NULL,
@@ -582,22 +588,46 @@ void bm_balloon_mesh_init(void) {
         .name = "bm_prov_retry",
     };
     ESP_ERROR_CHECK(esp_timer_create(&prov_retry_args, &s_prov_retry_timer));
+    ESP_LOGI(TAG, "step 3: bt controller init");
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
+    ESP_LOGI(TAG, "step 4: bt controller enable");
     ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
+    ESP_LOGI(TAG, "step 5: bluedroid init");
     ESP_ERROR_CHECK(esp_bluedroid_init());
+    ESP_LOGI(TAG, "step 6: bluedroid enable");
     ESP_ERROR_CHECK(esp_bluedroid_enable());
     bm_device_uuid(s_prov_uuid);
 
+    ESP_LOGI(TAG, "step 7: register callbacks");
     ESP_ERROR_CHECK(esp_ble_mesh_register_prov_callback(prov_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_config_server_callback(config_server_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_health_server_callback(health_server_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_register_custom_model_callback(custom_model_cb));
+    ESP_LOGI(TAG, "step 8: esp_ble_mesh_init");
     ESP_ERROR_CHECK(esp_ble_mesh_init(&s_prov, &s_composition));
+    ESP_LOGI(TAG, "step 9: client_model_init");
     /* Allocates the client's internal_data; without it every
      * esp_ble_mesh_client_model_send_msg() fails with -EINVAL. */
     ESP_ERROR_CHECK(esp_ble_mesh_client_model_init(&s_vendor_models[1]));
 
+    ESP_LOGI(TAG, "step 10: auto prov");
+#if defined(BM_DEV_AUTO_PROV) && BM_DEV_AUTO_PROV
+    int auto_err = bm_dev_auto_provision(0x0101, BM_GROUP_BALLOON);
+    if (auto_err == 0) {
+        state_lock();
+        xEventGroupSetBits(s_state_events,
+                           BM_MESH_STATE_PROVISIONED |
+                           BM_MESH_STATE_CONTROL_BOUND |
+                           BM_MESH_STATE_TELEMETRY_BOUND);
+        state_unlock();
+        s_primary_addr = esp_ble_mesh_get_primary_element_address();
+        ESP_LOGI(TAG, "dev auto-provisioned successfully: addr=0x%04x", s_primary_addr);
+    } else {
+        ESP_LOGE(TAG, "dev auto-provision failed: %d", auto_err);
+        start_provisioning();
+    }
+#else
     if (esp_ble_mesh_node_is_provisioned()) {
         state_lock();
         xEventGroupSetBits(s_state_events, BM_MESH_STATE_PROVISIONED);
@@ -607,6 +637,7 @@ void bm_balloon_mesh_init(void) {
     } else {
         start_provisioning();
     }
+#endif
     ESP_LOGI(TAG, "mesh initialized (provisioned=%d)", (int)mesh_is_provisioned());
 }
 

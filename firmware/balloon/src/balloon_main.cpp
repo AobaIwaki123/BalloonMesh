@@ -16,11 +16,26 @@
 
 static const char *TAG = "balloon";
 
+static int vprintf_to_serial(const char *fmt, va_list args) {
+    char buf[256];
+    int len = vsnprintf(buf, sizeof(buf), fmt, args);
+    if (len > 0) {
+        Serial.print(buf);
+    }
+    return len;
+}
+
 void setup() {
     Serial.begin(115200);
-    delay(200);
+    delay(500);
+    esp_log_set_vprintf(vprintf_to_serial);
     esp_log_level_set("*", ESP_LOG_INFO);
-    ESP_LOGI(TAG, "BalloonMesh balloon firmware %s", BM_FIRMWARE_VERSION);
+    ESP_LOGI(TAG, "BalloonMesh balloon firmware %s starting...", BM_FIRMWARE_VERSION);
+
+#if defined(BM_DEV_AUTO_PROV) && BM_DEV_AUTO_PROV
+    ESP_LOGW(TAG, "BM_DEV_AUTO_PROV enabled: erasing NVS");
+    ESP_ERROR_CHECK(nvs_flash_erase());
+#endif
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
