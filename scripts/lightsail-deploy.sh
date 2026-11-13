@@ -27,6 +27,7 @@ INSTANCE_NAME="balloonmesh-server"
 KEY_PATH="${LIGHTSAIL_KEY:-}"
 BUNDLE_ID="small_3_0"
 MODE="--demo"
+GATEWAY_TOKEN="${GATEWAY_TOKEN:-}"
 REGION="${AWS_DEFAULT_REGION:-ap-northeast-1}"
 PORT="5080"
 REMOTE_USER="ubuntu"
@@ -53,6 +54,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bundle)
       BUNDLE_ID="$2"
+      shift 2
+      ;;
+    --token)
+      GATEWAY_TOKEN="$2"
       shift 2
       ;;
     *)
@@ -171,7 +176,7 @@ rsync -avz \
 
 # 3. コンテナのビルドと起動
 echo "==> コンテナをビルド・起動しています (SIMULATION_ENABLED=${SIMULATION_ENABLED})..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${HOST}" "cd ${REMOTE_DIR} && export SIMULATION_ENABLED=${SIMULATION_ENABLED} && docker compose up -d --build"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${HOST}" "cd ${REMOTE_DIR} && export SIMULATION_ENABLED=${SIMULATION_ENABLED} GATEWAY_TOKEN='${GATEWAY_TOKEN}' && docker compose up -d --build"
 
 # 4. ヘルスチェック
 echo "==> デプロイの疎通確認中..."
