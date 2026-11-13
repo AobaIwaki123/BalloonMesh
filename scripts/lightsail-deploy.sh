@@ -17,12 +17,12 @@ set -euo pipefail
 #   --key <PATH>     SSH秘密鍵のパス（未指定時は ~/.ssh/ から自動検出）
 #   --bundle <ID>    プラン（small_3_0: 2GB/$12, micro_3_0: 1GB/$7。デフォルト: small_3_0）
 #   --token <TOKEN>  Gateway 認証トークン
-#   --allow-cidr <CIDR> 5080ポートの接続元IP制限（例: 219.104.138.249/32。未指定時は全開放）
+#   --allow-cidr <CIDR> 5080ポートの接続元IP制限（例: 203.0.113.1/32。未指定時は全開放）
 #
 # Examples:
 #   ./scripts/lightsail-deploy.sh                # デモモードで自動作成または更新
 #   ./scripts/lightsail-deploy.sh --prod         # 本番実機モードでデプロイ
-#   ./scripts/lightsail-deploy.sh --prod --token secret123 --allow-cidr 219.104.138.249/32
+#   ./scripts/lightsail-deploy.sh --prod --token secret123 --allow-cidr 203.0.113.1/32
 #   ./scripts/lightsail-deploy.sh --bundle micro_3_0  # $7/月の最小プランで作成
 # -----------------------------------------------------------------------------
 

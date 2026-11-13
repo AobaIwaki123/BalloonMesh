@@ -59,7 +59,7 @@ AWS 公式には Lightsail 専用の事前定義マネージドポリシーが�
 | `--bundle <ID>` | プラン指定（`small_3_0`: 2GB/$12/月, `micro_3_0`: 1GB/$7/月） | `small_3_0` |
 | `--key <PATH>` | SSH 秘密鍵パス | `~/.ssh/` 下の既存鍵を自動検出 |
 | `--token <TOKEN>` | Gateway 認証トークン | `GATEWAY_TOKEN` 環境変数または未設定 |
-| `--allow-cidr <CIDR>` | 5080ポート接続元の IP 制限（例: `219.104.138.249/32`） | 全開放 (`0.0.0.0/0`) |
+| `--allow-cidr <CIDR>` | 5080ポート接続元の IP 制限（例: `203.0.113.1/32`） | 全開放 (`0.0.0.0/0`) |
 | `--name <NAME>` | Lightsail インスタンス名 | `balloonmesh-server` |
 
 ---
