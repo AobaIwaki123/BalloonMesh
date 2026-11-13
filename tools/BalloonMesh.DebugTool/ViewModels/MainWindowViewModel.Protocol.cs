@@ -127,7 +127,6 @@ public partial class MainWindowViewModel
     {
         ProtocolOpcode = $"0x{command.Opcode:X6}";
         ProtocolPayload = command.Payload;
-        ExpandShortOpcode = false;
         DecodeProtocolMessage();
         SelectedTabIndex = 3;
     }

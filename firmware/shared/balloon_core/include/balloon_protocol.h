@@ -7,7 +7,7 @@
  *
  * Provisional values (see docs/decisions.md):
  *   Company ID        0x02E5 (Espressif)
- *   Message opcodes   0x01..0x0A
+ *   Message opcodes   0x01..0x0C
  *
  * These values are deliberately centralised here so that a production
  * deployment can change them without touching business logic.

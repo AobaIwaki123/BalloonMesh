@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.WebSockets;
 using System.Text.Json;
 using System.Threading.Channels;
 using BalloonMesh.Server.Hubs;
@@ -19,15 +20,32 @@ public sealed class GatewayClient
         });
     }
 
+    private long _webSocketGeneration;
+
+    /// <summary>Serializes attach/detach/state swaps for this gateway.</summary>
+    public object ConnectionGate { get; } = new();
+
     public string Id { get; }
     public Channel<DownlinkCommand> Commands { get; }
+    public WebSocket? CurrentSocket { get; set; }
+    public bool WriterBusy { get; set; }
     public bool WebSocketConnected { get; set; }
+    public bool HasWebSocket { get; set; }
+    public bool HttpPolling { get; set; }
+    public bool ProvisionedReported { get; set; }
+    public long WebSocketGeneration => Interlocked.Read(ref _webSocketGeneration);
+    public CancellationTokenSource? WebSocketLifetime { get; set; }
+    public Task? WebSocketWriter { get; set; }
     public string? Remote { get; set; }
     public string? Firmware { get; set; }
     public bool Provisioned { get; set; }
     public int SpoolPending { get; set; }
     public DateTimeOffset LastSeen { get; set; } = DateTimeOffset.UtcNow;
-    public int PendingCommands => Commands.Reader.CanCount ? Commands.Reader.Count : 0;
+    public int PendingCommands =>
+        (Commands.Reader.CanCount ? Commands.Reader.Count : 0) + (WriterBusy ? 1 : 0);
+
+    public long BumpWebSocketGeneration() =>
+        Interlocked.Increment(ref _webSocketGeneration);
 }
 
 /// <summary>
@@ -58,30 +76,180 @@ public sealed class GatewayRegistry
         return client;
     }
 
-    public bool AttachWebSocket(string id, string? remote, string? firmware)
+    public long AttachWebSocket(string id, string? remote, string? firmware,
+        bool provisioned, int spoolPending, WebSocket socket,
+        CancellationTokenSource lifetime)
     {
         var client = GetOrRegister(id, firmware);
-        client.WebSocketConnected = true;
-        client.Remote = remote;
+        long generation;
+        CancellationTokenSource? previous;
+        lock (client.ConnectionGate)
+        {
+            // Bump first: the old handler's detach/state callbacks must see a
+            // stale generation as soon as the new connection is accepted.
+            generation = client.BumpWebSocketGeneration();
+            previous = client.WebSocketLifetime;
+            client.WebSocketLifetime = lifetime;
+            client.CurrentSocket = socket;
+            client.Provisioned = provisioned;
+            client.ProvisionedReported = true;
+            client.SpoolPending = spoolPending;
+            client.WebSocketConnected = true;
+            client.HasWebSocket = true;
+            client.Remote = remote;
+        }
+        // Stop the previous receive loop; the single writer survives and will
+        // pick up the new CurrentSocket.
+        if (previous is not null)
+        {
+            try
+            {
+                previous.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The previous handler already finished.
+            }
+        }
         _ = NotifyChangedAsync();
-        return true;
+        return generation;
     }
 
-    public async Task DetachWebSocketAsync(string id)
+    /// <summary>Starts the single persistent writer for this gateway once.</summary>
+    public void EnsureWebSocketWriter(string id, Func<Task> factory)
+    {
+        var client = GetOrRegister(id);
+        lock (client.ConnectionGate)
+        {
+            client.WebSocketWriter ??= factory();
+        }
+    }
+
+    public async Task DetachWebSocketAsync(string id, long generation)
     {
         if (_clients.TryGetValue(id, out var client))
         {
-            client.WebSocketConnected = false;
-            client.LastSeen = DateTimeOffset.UtcNow;
+            lock (client.ConnectionGate)
+            {
+                if (client.WebSocketGeneration == generation)
+                {
+                    // Only the current connection may clear the socket/flag.
+                    client.CurrentSocket = null;
+                    client.WebSocketConnected = false;
+                    client.LastSeen = DateTimeOffset.UtcNow;
+                }
+            }
         }
         await NotifyChangedAsync();
     }
 
-    public void Touch(string id, string? firmware = null)
+    public void UpdateRuntimeState(string id, bool? provisioned, int? spoolPending,
+        long? generation = null)
+    {
+        var client = GetOrRegister(id);
+        var changed = false;
+        lock (client.ConnectionGate)
+        {
+            if (generation is { } expected &&
+                client.WebSocketGeneration != expected)
+            {
+                // A stale connection must not overwrite the current one's state.
+                return;
+            }
+            if (provisioned is { } value)
+            {
+                if (client.Provisioned != value)
+                {
+                    client.Provisioned = value;
+                    changed = true;
+                }
+                if (!client.ProvisionedReported)
+                {
+                    client.ProvisionedReported = true;
+                    changed = true;
+                }
+            }
+            if (spoolPending is { } spool && client.SpoolPending != spool)
+            {
+                client.SpoolPending = spool;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            _ = NotifyChangedAsync();
+        }
+    }
+
+    /// <summary>
+    /// A gateway only polls commands after its mesh models are ready, so a
+    /// successful poll is itself a readiness signal.  This prevents an HTTP
+    /// gateway from latching "unready" forever after an early spooled event.
+    /// </summary>
+    public void MarkReady(string id)
+    {
+        var client = GetOrRegister(id);
+        var changed = false;
+        lock (client.ConnectionGate)
+        {
+            if (!client.Provisioned)
+            {
+                client.Provisioned = true;
+                changed = true;
+            }
+            if (!client.ProvisionedReported)
+            {
+                client.ProvisionedReported = true;
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            _ = NotifyChangedAsync();
+        }
+    }
+
+    public void BeginPoll(string id)
+    {
+        var client = GetOrRegister(id);
+        lock (client.ConnectionGate)
+        {
+            client.HttpPolling = true;
+            client.HasWebSocket = false;
+            client.LastSeen = DateTimeOffset.UtcNow;
+        }
+    }
+
+    public void EndPoll(string id)
+    {
+        if (_clients.TryGetValue(id, out var client))
+        {
+            lock (client.ConnectionGate)
+            {
+                client.HttpPolling = false;
+                client.LastSeen = DateTimeOffset.UtcNow;
+            }
+        }
+    }
+
+    public void Touch(string id, string? firmware = null, bool webSocket = false)
     {
         var isNew = !_clients.ContainsKey(id);
         var client = GetOrRegister(id, firmware);
-        client.LastSeen = DateTimeOffset.UtcNow;
+        lock (client.ConnectionGate)
+        {
+            client.LastSeen = DateTimeOffset.UtcNow;
+            if (webSocket)
+            {
+                client.HasWebSocket = true;
+            }
+            else if (!client.WebSocketConnected)
+            {
+                // A gateway that never reconnects its WebSocket may have
+                // switched to HTTP; let the HTTP activity rule apply again.
+                client.HasWebSocket = false;
+            }
+        }
         if (isNew)
         {
             _ = NotifyChangedAsync();
@@ -94,15 +262,29 @@ public sealed class GatewayRegistry
         {
             // HTTP gateways are never removed, so only recently seen or
             // WebSocket-connected clients count as active receivers.
-            var cutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
+            var now = DateTimeOffset.UtcNow;
+            // An HTTP gateway is a delivery path only while it is actually
+            // long-polling (or just finished a poll).  A gateway that stopped
+            // polling must not make a command look delivered.
+            var httpCutoff = now.AddSeconds(-5);
             var clients = _clients.Values
-                .Where(client => client.WebSocketConnected || client.LastSeen >= cutoff)
+                .Where(client => client.HasWebSocket
+                    // A detached WebSocket gateway must not fall back to the
+                    // HTTP "recently seen" rule: its old channel has no reader.
+                    // Readiness is required because an unbound model drops
+                    // downlinks silently.
+                    ? client.WebSocketConnected && client.Provisioned
+                    // HTTP gateways are only active while they keep polling.
+                    // If they explicitly reported "not ready", respect it.
+                    : (client.HttpPolling || client.LastSeen >= httpCutoff) &&
+                      (!client.ProvisionedReported || client.Provisioned))
                 .ToArray();
-            if (clients.Any(client => client.PendingCommands >= GatewayQueueCapacity))
-            {
-                return 0;
-            }
-            return clients.Count(client => client.Commands.Writer.TryWrite(command));
+            // One full gateway must not block delivery through the remaining
+            // gateways: they broadcast to the same mesh, so a healthy path can
+            // still cover the target.  Only fail when no client can accept it.
+            return clients.Count(client =>
+                client.PendingCommands < GatewayQueueCapacity &&
+                client.Commands.Writer.TryWrite(command));
         }
     }
 
@@ -112,7 +294,8 @@ public sealed class GatewayRegistry
         return client.Commands.Reader.TryRead(out command);
     }
 
-    public async Task<DownlinkCommand?> ReadCommandAsync(string id, int waitMs, CancellationToken cancellationToken)
+    public async Task<DownlinkCommand?> ReadCommandAsync(string id, int waitMs,
+        CancellationToken cancellationToken)
     {
         var client = GetOrRegister(id);
         if (waitMs <= 0)

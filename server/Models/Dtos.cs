@@ -137,7 +137,8 @@ public sealed record GatewayEventDto(
     string Payload,
     int Rssi,
     int Ttl,
-    long? ReceivedMs);
+    long? ReceivedMs,
+    long? AgeMs = null);
 
 public sealed record GatewayEventsRequest(
     string GatewayId,

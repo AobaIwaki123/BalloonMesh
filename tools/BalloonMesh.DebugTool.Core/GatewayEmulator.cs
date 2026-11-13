@@ -152,8 +152,6 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                     _loopAlive = true;
                     generation = ++_runGeneration;
                 }
-                RaiseConnection(true,
-                    $"{TransportName(_options.Transport)} connected as {_options.GatewayId}");
                 lock (_gate)
                 {
                     _loop = _options.Transport == GatewayTransport.WebSocket
@@ -162,6 +160,25 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                         : Task.Run(() => PollLoopAsync(cts.Token, generation),
                             CancellationToken.None);
                 }
+
+                if (_options.Transport == GatewayTransport.WebSocket)
+                {
+                    // Give the server a moment to reject a bad token/hello.
+                    // A rejected connection closes immediately and the receive
+                    // loop stops; a valid one stays open.
+                    await Task.Delay(500, cts.Token).ConfigureAwait(false);
+                }
+
+                lock (_gate)
+                {
+                    if (!_loopAlive || generation != _runGeneration)
+                    {
+                        throw new WebSocketException(
+                            "The gateway disconnected before the connection was ready.");
+                    }
+                }
+                RaiseConnection(true,
+                    $"{TransportName(_options.Transport)} connected as {_options.GatewayId}");
             }
             catch
             {
@@ -169,6 +186,7 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 {
                     _runCts = null;
                     _loopAlive = false;
+                    _loop = null;
                 }
                 cts.Cancel();
                 cts.Dispose();
@@ -400,6 +418,12 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
+                if (!_options.Provisioned)
+                {
+                    // Match the real gateway, which only polls while ready.
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
                 var commands = await _api.ReadGatewayCommandsAsync(_options.GatewayId,
                     _options.PollWaitMs, cancellationToken).ConfigureAwait(false);
                 foreach (var command in commands)
@@ -489,7 +513,18 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
         }
         finally
         {
+            // Release only this run's socket; a timed-out Stop can be followed
+            // by a new Start before the old loop unwinds.
+            DisposeSocketIfCurrent(generation);
             MarkLoopStopped(generation, "WebSocket disconnected");
+        }
+    }
+
+    private bool IsCurrentRun(long generation)
+    {
+        lock (_gate)
+        {
+            return generation == _runGeneration;
         }
     }
 
@@ -580,6 +615,26 @@ public sealed class GatewayEmulator : IDisposable, IAsyncDisposable
                 Debug.WriteLine($"Gateway emulator event handler failed: {exception}");
             }
         }
+    }
+
+    private void DisposeSocketIfCurrent(long generation)
+    {
+        ClientWebSocket? socket;
+        lock (_gate)
+        {
+            if (generation != _runGeneration)
+            {
+                return;
+            }
+            socket = _socket;
+            _socket = null;
+        }
+        if (socket is null)
+        {
+            return;
+        }
+        socket.Abort();
+        socket.Dispose();
     }
 
     private void DisposeSocket()

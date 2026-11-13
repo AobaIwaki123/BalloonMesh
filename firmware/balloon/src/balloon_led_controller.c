@@ -24,16 +24,92 @@ typedef struct {
     bool initialized;
     bool dirty;
     uint32_t last_save_ms;
+    bool status_pending;
+    uint8_t status_kind;
+    uint16_t status_count;
+    uint32_t last_status_attempt_ms;
 } bm_led_controller_t;
 
 static bm_led_controller_t s_controller;
+static SemaphoreHandle_t s_save_lock;
+static bm_led_queue_t *s_pending_save;
 
-static void send_monitor_event_locked(int event, uint16_t count) {
-    if (event == 0 || s_controller.sender == NULL) {
+static bool handoff_snapshot(bm_led_queue_t *snapshot) {
+    if (snapshot == NULL) {
+        return true;
+    }
+    if (s_save_lock == NULL ||
+        xSemaphoreTake(s_save_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
+        free(snapshot);
+        return false;
+    }
+    bm_led_queue_t *previous = s_pending_save;
+    s_pending_save = snapshot;
+    xSemaphoreGive(s_save_lock);
+    free(previous);
+    return true;
+}
+
+static void save_task(void *argument) {
+    (void)argument;
+    for (;;) {
+        bm_led_queue_t *snapshot = NULL;
+        if (s_save_lock != NULL &&
+            xSemaphoreTake(s_save_lock, portMAX_DELAY) == pdTRUE) {
+            snapshot = s_pending_save;
+            s_pending_save = NULL;
+            xSemaphoreGive(s_save_lock);
+        }
+        if (snapshot != NULL) {
+            bool saved = bm_persistence_save_queue(snapshot);
+            free(snapshot);
+            if (!saved &&
+                xSemaphoreTake(s_controller.lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+                s_controller.dirty = true;
+                xSemaphoreGive(s_controller.lock);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+static void send_status_locked(uint8_t kind, uint16_t count) {
+    if (s_controller.sender == NULL) {
         return;
     }
-    uint8_t kind = event == 1 ? BM_QUEUE_STATUS_NEAR_FULL : BM_QUEUE_STATUS_RECOVERED;
-    s_controller.sender(kind, count);
+    s_controller.last_status_attempt_ms =
+        (uint32_t)(esp_timer_get_time() / 1000);
+    if (s_controller.sender(kind, count)) {
+        s_controller.status_pending = false;
+    } else {
+        /* The mesh may not be bound yet (for example right after boot), so
+         * keep the status and retry instead of losing it. */
+        s_controller.status_pending = true;
+        s_controller.status_kind = kind;
+        s_controller.status_count = count;
+    }
+}
+
+static void send_monitor_event_locked(int event, uint16_t count) {
+    if (event == 0) {
+        return;
+    }
+    send_status_locked(
+        event == 1 ? BM_QUEUE_STATUS_NEAR_FULL : BM_QUEUE_STATUS_RECOVERED,
+        count);
+}
+
+static void retry_pending_status_locked(uint32_t now_ms) {
+    if (!s_controller.status_pending || s_controller.sender == NULL) {
+        return;
+    }
+    if ((uint32_t)(now_ms - s_controller.last_status_attempt_ms) < 5000u) {
+        return;
+    }
+    s_controller.last_status_attempt_ms = now_ms;
+    if (s_controller.sender(s_controller.status_kind, s_controller.status_count)) {
+        s_controller.status_pending = false;
+    }
 }
 
 static void mark_dirty_locked(void) {
@@ -74,6 +150,7 @@ static void led_task(void *argument) {
             }
 
             uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+            retry_pending_status_locked(now_ms);
             if (s_controller.dirty &&
                 (uint32_t)(now_ms - s_controller.last_save_ms) >= 2000u) {
                 snapshot = (bm_led_queue_t *)malloc(sizeof(*snapshot));
@@ -91,14 +168,10 @@ static void led_task(void *argument) {
             ESP_LOGI(TAG, "executed RGB %u,%u,%u", output.r, output.g, output.b);
         }
 
-        if (snapshot != NULL) {
-            bool saved = bm_persistence_save_queue(snapshot);
-            free(snapshot);
-            if (!saved &&
-                xSemaphoreTake(s_controller.lock, pdMS_TO_TICKS(50)) == pdTRUE) {
-                s_controller.dirty = true;
-                xSemaphoreGive(s_controller.lock);
-            }
+        if (!handoff_snapshot(snapshot) &&
+            xSemaphoreTake(s_controller.lock, pdMS_TO_TICKS(50)) == pdTRUE) {
+            s_controller.dirty = true;
+            xSemaphoreGive(s_controller.lock);
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -116,10 +189,22 @@ void bm_led_controller_init(bm_queue_status_sender_t sender) {
                           s_controller.queue.current.g,
                           s_controller.queue.current.b);
     }
+    s_save_lock = xSemaphoreCreateMutex();
     s_controller.sender = sender;
     s_controller.last_save_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    /* One boot-time status (not a periodic stream): it tells the server the
+     * restored queue depth.  If the mesh is not bound yet, the controller
+     * keeps it pending and retries.  Later updates are transition-driven. */
+    (void)bm_queue_monitor_update(&s_controller.monitor, s_controller.queue.count);
+    send_status_locked(
+        s_controller.monitor.near_full ? BM_QUEUE_STATUS_NEAR_FULL
+                                       : BM_QUEUE_STATUS_RECOVERED,
+        s_controller.queue.count);
     s_controller.initialized = true;
     xTaskCreate(led_task, "led_queue", 4096, NULL, 6, NULL);
+    if (s_save_lock != NULL) {
+        xTaskCreate(save_task, "led_save", 4096, NULL, 3, NULL);
+    }
 }
 
 void bm_led_controller_handle_opcode(uint32_t opcode,

@@ -17,6 +17,7 @@ public sealed class TemporaryDatabase : IDisposable
         _directory = Path.Combine(Path.GetTempPath(), "balloonmesh-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_directory);
         var configuration = new ConfigurationBuilder()
+            .AddEnvironmentVariables()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Data:Schema"] = "balloonmesh_tests"

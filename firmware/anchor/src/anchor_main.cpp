@@ -59,19 +59,14 @@ static void gps_task(void *argument) {
 
 static void udp_task(void *argument) {
     (void)argument;
-    WiFiUDP udp;
-    if (!udp.begin(BM_ANCHOR_UDP_PORT)) {
-        ESP_LOGE(TAG, "UDP bind failed");
-        vTaskDelete(NULL);
-        return;
-    }
-    ESP_LOGI(TAG, "UDP anchor data server on port %u", BM_ANCHOR_UDP_PORT);
 
     char id_text[8];
     snprintf(id_text, sizeof(id_text), "%d", BM_ANCHOR_ID);
     char ssid[32];
     snprintf(ssid, sizeof(ssid), "%s%s", BM_ANCHOR_SSID_PREFIX, id_text);
 
+    // Wi-Fi must be initialised before WiFiUDP::begin() creates and binds the
+    // lwIP socket; otherwise the bind fails and the anchor silently dies.
     WiFi.mode(WIFI_AP);
     WiFi.softAP(ssid, BM_ANCHOR_WIFI_PASSWORD, BM_ANCHOR_WIFI_CHANNEL, 0, 4);
     wifi_config_t config = {};
@@ -80,6 +75,13 @@ static void udp_task(void *argument) {
         esp_wifi_set_config(WIFI_IF_AP, &config);
     }
     esp_wifi_ftm_resp_set_offset(0);
+
+    WiFiUDP udp;
+    while (!udp.begin(BM_ANCHOR_UDP_PORT)) {
+        ESP_LOGE(TAG, "UDP bind failed; retrying");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    ESP_LOGI(TAG, "UDP anchor data server on port %u", BM_ANCHOR_UDP_PORT);
     ESP_LOGI(TAG, "SoftAP '%s' started, IP=%s, channel=%u, FTM responder",
              ssid, WiFi.softAPIP().toString().c_str(), BM_ANCHOR_WIFI_CHANNEL);
 

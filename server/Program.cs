@@ -88,11 +88,21 @@ app.Map("/ws/gateway", async context =>
 
 app.MapGet("/login", (HttpContext context, IConfiguration configuration) =>
 {
-    if (context.User.Identity?.IsAuthenticated == true)
+    var canView = context.User.Identity?.IsAuthenticated == true &&
+                  (context.User.IsInRole(AuthRoles.Viewer) ||
+                   context.User.IsInRole(AuthRoles.Operator) ||
+                   context.User.IsInRole(AuthRoles.Admin));
+    if (canView)
     {
         return Results.Redirect("/");
     }
     var error = context.Request.Query["error"].ToString();
+    if (context.User.Identity?.IsAuthenticated == true && string.IsNullOrEmpty(error))
+    {
+        // Authenticated but without a usable role must not bounce to "/"
+        // forever; show the login page with an explanation instead.
+        error = "Your account has no access role.";
+    }
     return Svelte.View(
         "Login",
         new LoginPageModel(
@@ -214,10 +224,18 @@ app.MapGet("/api/gateways", (GatewayRegistry gateways) => Results.Ok(gateways.Sn
 app.MapGet("/api/show", (DataStore store, int? limit) =>
     Results.Ok(store.GetShowSteps(limit ?? 50))).RequireAuthorization(AuthRoles.Viewer);
 
-app.MapDelete("/api/show/{id:long}", async (long id, CommandService service, CancellationToken cancellationToken) =>
+app.MapDelete("/api/show/{id:long}", async (long id, CommandService service,
+    CancellationToken cancellationToken) =>
 {
-    var result = await service.CancelShowStepAsync(id, cancellationToken);
-    return result is null ? Results.NotFound() : Results.Ok(result);
+    try
+    {
+        var result = await service.CancelShowStepAsync(id, cancellationToken);
+        return result is null ? Results.NotFound() : Results.Ok(result);
+    }
+    catch (ArgumentException exception)
+    {
+        return Results.BadRequest(new { error = exception.Message });
+    }
 }).RequireAuthorization(AuthRoles.Operator);
 
 app.MapGet("/api/onboarding/mock", (MockProvisioningService service) =>
@@ -308,15 +326,7 @@ app.MapPost("/api/gateway/{id}/events",
             return Results.Unauthorized();
         }
         registry.Touch(id, request.Firmware);
-        var client = registry.GetOrRegister(id, request.Firmware);
-        if (request.Provisioned is { } provisioned)
-        {
-            client.Provisioned = provisioned;
-        }
-        if (request.SpoolPending is { } spoolPending)
-        {
-            client.SpoolPending = spoolPending;
-        }
+        registry.UpdateRuntimeState(id, request.Provisioned, request.SpoolPending);
         if (request.Events is null)
         {
             return Results.BadRequest(new { error = "events is required." });
@@ -337,20 +347,31 @@ app.MapGet("/api/gateway/{id}/commands",
         {
             return Results.Unauthorized();
         }
-        registry.Touch(id);
-        var wait = Math.Clamp(waitMs ?? 10_000, 0, 30_000);
-        var first = await registry.ReadCommandAsync(id, wait, cancellationToken);
-        if (first is null)
+        registry.BeginPoll(id);
+        // The firmware only polls after provisioning and model binding are
+        // complete, so polling is a readiness signal.
+        registry.MarkReady(id);
+        try
         {
-            return Results.NoContent();
-        }
+            var wait = Math.Clamp(waitMs ?? 10_000, 0, 30_000);
+            var first = await registry.ReadCommandAsync(id, wait, cancellationToken);
+            if (first is null)
+            {
+                return Results.NoContent();
+            }
 
-        var commands = new List<GatewayCommandDto> { first.ToDto() };
-        while (commands.Count < 32 && registry.TryReadCommand(id, out var next) && next is not null)
-        {
-            commands.Add(next.ToDto());
+            var commands = new List<GatewayCommandDto> { first.ToDto() };
+            while (commands.Count < 32 && registry.TryReadCommand(id, out var next) &&
+                   next is not null)
+            {
+                commands.Add(next.ToDto());
+            }
+            return Results.Ok(new GatewayCommandsRequest(commands));
         }
-        return Results.Ok(new GatewayCommandsRequest(commands));
+        finally
+        {
+            registry.EndPoll(id);
+        }
     });
 
 app.Run();

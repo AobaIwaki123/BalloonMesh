@@ -13,6 +13,14 @@ firmware/
   tests/      native Unity テスト
 ```
 
+## 前提
+
+- PlatformIO Core (`pio`) が PATH 上にあること
+- native テストは gcc が必要（Windows は MSYS2 の `C:\msys64\mingw64\bin` を PATH に追加）
+- 初回ビルドは ESP-IDF の Bluetooth スタックもソースからビルドするため、数分〜十数分かかる
+
+`build-all.ps1` は各 `pio` の終了コードを確認し、失敗時は非 0 で停止します。
+
 ## Build all projects
 
 ```powershell
@@ -82,7 +90,9 @@ balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 8bit** �
 
 - Provisioning UUID は Bluetooth MAC から個体別に生成
 - 基準局が使えない場合、Mesh ピアへ `TIME_REQUEST` を送り、最初の `TIME_REPORT` で時計を補正
-- Gateway は未送信 Mesh イベントを NVS に最大 128 件保持し、WebSocket/HTTP 再接続後に再送
+- Gateway は未送信 Mesh イベントを NVS に最大 128 件保持し、WebSocket/HTTP 再接続後に再送。`ageMs` で滞留時間を通知する
+- Balloon は起動時としきい値遷移時に実際の LED キュー件数を送信（周期送信なし、失敗時は再試行）
+- Balloon の BLE 近隣探索は測位サイクル開始から 20 秒窓で実行し、FTM が 3 局以上成功した場合は結果を破棄
 - Gateway は `BM_GATEWAY_TOKEN` を hello / `X-Gateway-Token` ヘッダで送信
 - サーバ側 `Gateway:Token` と一致しない接続は拒否
 - `balloon` / `gateway` は BLE Mesh 設定を NVS に保存し、再起動後も Provisioning 状態と group subscription を復元

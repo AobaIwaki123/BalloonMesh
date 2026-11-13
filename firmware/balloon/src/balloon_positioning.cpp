@@ -145,9 +145,11 @@ static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
         esp_err_t err = esp_wifi_ftm_initiate_session(&config);
         if (err == ESP_OK) {
             if (xSemaphoreTake(s_ftm_done, pdMS_TO_TICKS(8000)) == pdTRUE) {
+                // The wire field is uint16 centimetres; a longer range would
+                // be clamped and reported as a wrong (much shorter) distance.
                 measured = s_ftm_ok &&
                            s_ftm_distance_cm > 0 &&
-                           s_ftm_distance_cm <= 200000u;
+                           s_ftm_distance_cm <= 65535u;
             }
             esp_wifi_ftm_end_session();
         } else {
@@ -165,12 +167,14 @@ static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
             .batch_id = batch_id,
         };
         uint8_t payload[8];
-        if (bm_encode_ftm_report(payload, sizeof(payload), &report) == 8) {
+        if (bm_encode_ftm_report(payload, sizeof(payload), &report) == 8 &&
             bm_balloon_mesh_send(BM_VENDOR_OPCODE(BM_OP_FTM_REPORT),
-                                 BM_GROUP_FTM_REPORT, 7, payload, 8);
+                                 BM_GROUP_FTM_REPORT, 7, payload, 8)) {
             (*valid_count)++;
             ESP_LOGI(TAG, "reported anchor %u distance %u cm", anchor->id,
                      report.distance_cm);
+        } else {
+            ESP_LOGW(TAG, "anchor %u measurement was not sent", anchor->id);
         }
     }
 
@@ -188,17 +192,24 @@ static void positioning_task(void *argument) {
     bool first = true;
     for (;;) {
         uint8_t valid_count = 0;
+        uint32_t cycle_start = millis();
+        // Start probing at the beginning of the cycle.  Starting after a slow
+        // anchor scan made the reports miss the server's 30 s FTM batch
+        // window exactly when the fallback was needed.
+        bm_neighbor_link_begin_collection(cycle_start);
         for (size_t i = 0; i < sizeof(BM_ANCHORS) / sizeof(BM_ANCHORS[0]); ++i) {
             measure_anchor(&BM_ANCHORS[i], batch_id, &valid_count);
         }
 
         if (valid_count <= 2) {
-            uint32_t start = millis();
-            bm_neighbor_link_begin_collection(start);
-            vTaskDelay(pdMS_TO_TICKS(BM_NEIGHBOR_PROBE_WINDOW_MS + 500u));
+            uint32_t elapsed = (uint32_t)(millis() - cycle_start);
+            if (elapsed < BM_NEIGHBOR_PROBE_WINDOW_MS) {
+                vTaskDelay(pdMS_TO_TICKS(BM_NEIGHBOR_PROBE_WINDOW_MS - elapsed + 500u));
+            }
             bm_neighbor_link_finish_collection(batch_id);
         } else {
-            ESP_LOGI(TAG, "FTM success=%u, skipping BLE neighbour probe", valid_count);
+            bm_neighbor_link_abort_collection();
+            ESP_LOGI(TAG, "FTM success=%u, discarding BLE neighbour probes", valid_count);
         }
 
         batch_id = (uint8_t)(batch_id + 1u);

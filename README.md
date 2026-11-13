@@ -98,7 +98,7 @@ $env:Simulation__Enabled = "false"
 dotnet test server/BalloonMesh.Server.Tests/BalloonMesh.Server.Tests.csproj
 ```
 
-PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、30 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
+PostgreSQL の `balloonmesh_tests` スキーマを使用します（`balloonmesh` DB 内、48 tests）。テスト前に自動で `TRUNCATE` と再シードを行います。
 
 ファームウェアの native テスト:
 
@@ -178,9 +178,9 @@ Cookie 認証を基盤に、OIDC と Discord OAuth2 を利用できます。UI�
 |---|---|---|
 | Viewer | Viewer / Operator / Admin | 地図・状態・履歴の閲覧 |
 | Operator | Operator / Admin | LED 命令、初期位置、予約キャンセル |
-| Admin | Admin | 基準局更新、グループ DB 管理、デモ、オンボーディング操作 |
+| Admin | Admin | 基準局更新、デモ、オンボーディング操作 |
 
-- 未ログインの API は `401`、権限不足は `403`
+- 保護された API は未ログインで `401`、権限不足で `403`（`/api/health`、`/favicon.ico`、認証エンドポイントは公開）
 - 未ログインのページは `/login` へリダイレクト
 - Gateway の `/api/gateway/*` と `/ws/gateway` はユーザー認証ではなく `Gateway:Token` で認証
 - SignalR `/hubs/monitor` は Viewer 以上を要求
@@ -249,7 +249,7 @@ dotnet run --project server/BalloonMesh.Server.csproj --urls http://localhost:50
 - `GET /api/onboarding/mock` — モックデバイス一覧
 - `POST /api/onboarding/mock/{id}/provision` — 数秒かけて `unprovisioned → provisioning → provisioned` をシミュレーション
 - `POST /api/onboarding/mock/reset` — 初期状態へ戻す
-- SignalR `onboardingUpdated` で全 Admin に反映
+- SignalR `onboardingUpdated` で接続中の全クライアントに反映（REST API は Admin のみ）
 
 実際の Provisioner 本体 / 鍵配布 / model bind / グループ購読の自動化は未実装です（ファームウェアは Provision 完了後に固定グループへ subscribe します）。
 
@@ -277,7 +277,7 @@ pio run -t upload
 | `firmware/anchor` | GPS 基準局 | NMEA UART、SoftAP、FTM Responder、UDP |
 | `firmware/gateway` | Mesh Gateway | BLE Mesh Node、WebSocket（既定）/ HTTP ポーリング |
 
-`anchor` は `platformio.ini` の `-DBM_ANCHOR_ID=N` で ID を変えてビルドします。`gateway` は `firmware/gateway/platformio.ini` の `BM_GATEWAY_ID` / `BM_SERVER_URL` / Wi-Fi 設定を環境に合わせて変更してください。`balloon` は通常の `balloon` 環境に加え、測位を無効化した BLE Mesh 立ち上げ用の `balloon-mesh-bringup` 環境も利用できます。
+`anchor` は `platformio.ini` の `-DBM_ANCHOR_ID=N` で ID を変えてビルドします。`gateway` は `firmware/shared/balloon_common/include/bm_config.h` の `BM_GATEWAY_ID` / `BM_SERVER_URL` / Wi-Fi 設定（または `platformio.ini` の `-D` 上書き）を環境に合わせて変更してください。`balloon` は通常の `balloon` 環境に加え、測位を無効化した BLE Mesh 立ち上げ用の `balloon-mesh-bringup` 環境も利用できます。
 
 一括ビルド:
 
@@ -299,7 +299,7 @@ pio run -t upload
 - 実行済み・cutoff 以前・キャンセル済みの遅延到着を拒否
 - 512 件満杯時は「最も遠い未来」を追い出し、近い予約を保護
 - cutoff は単調増加、等しい/古い RESET を無視
-- 401 件で `NEAR_FULL`、350 件で `RECOVERED` を 1 回通知（ヒステリシス）
+- 起動時と 401 件 `NEAR_FULL` / 350 件 `RECOVERED` の遷移時にキュー件数を通知（周期的な送信はしない）
 - 前方ジャンプ再同期では通過した予約を実行せず破棄
 - 未同期でも予約を保持し、初回同期で過去分を破棄
 - LED キュー・cutoff・現在色を NVS に保存し、再起動時に復元（2 秒 debounce）
@@ -309,8 +309,8 @@ pio run -t upload
 
 ### 測位
 
-- バルーンは 180 秒 + 0〜30 秒の共通サイクルで、基準局データ取得 → FTM → 時刻補正 → 条件付き BLE 近隣探索を順に実行
-- FTM 成功が 2 局以下のときだけ 20 秒の近隣探索
+- バルーンは 180 秒 + 0〜30 秒の共通サイクルで、基準局データ取得 → FTM → 時刻補正を実行
+- BLE 近隣探索はサイクル開始から 20 秒窓で並行し、FTM 成功が 2 局以下のときだけ結果を送信（3 局以上なら破棄）
 - `NEIGHBOR_REQUEST` / `NEIGHBOR_PROBE` は TTL=0、`NEIGHBOR_REPORT` は通常 TTL
 - サーバ側で `(src, batch_id)` ごとに集約し、`t0+10s` で初回計算、`t0+30s` まで再計算
 - 完全重複を破棄、同一 anchor は新しい timestamp を採用
@@ -410,7 +410,7 @@ FTM_REPORT の 4B timestamp は、確定仕様で未決定のため **LED tick40
 ## 既知の制約・注意
 
 1. **BLE Mesh Node のビルド構成**
-   `balloon` と `gateway` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込みます。`sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y` と `CONFIG_BLE_MESH_SETTINGS=y` を有効にして Bluetooth スタックをソースからビルドするため、Arduino 同梱のプリビルド `libbt.a` は使いません。`-DCONFIG_BLE_MESH_NODE=1` も不要です。Provisioning 情報（ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、SEQ/RPL）は NVS に保存され、再起動後も復元されます。初回ビルドは ESP-IDF 全体を作るため時間がかかりますが、2 回目以降は差分ビルドになります。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
+   `balloon` と `gateway` は `framework = arduino, espidf` とし、ESP-IDF 4.4.7 を Arduino のコンポーネントとして組み込みます。`sdkconfig.defaults` で `CONFIG_BLE_MESH_NODE=y` と `CONFIG_BLE_MESH_SETTINGS=y` を有効にして Bluetooth スタックをソースからビルドするため、Arduino 同梱のプリビルド `libbt.a` は使いません。`balloon` はさらに `CONFIG_ESP_WIFI_FTM_ENABLE=y` / `CONFIG_ESP_WIFI_FTM_INITIATOR_SUPPORT=y` を有効にします。`-DCONFIG_BLE_MESH_NODE=1` も不要です。Provisioning 情報（ユニキャストアドレス、NetKey/AppKey、model bind、group subscription、SEQ/RPL）は NVS に保存され、再起動後も復元されます。初回ビルドは ESP-IDF 全体を作るため時間がかかりますが、2 回目以降は差分ビルドになります。詳細は [firmware/README.md](firmware/README.md) と [docs/decisions.md](docs/decisions.md) の項目 12 を参照してください。
 2. **Gateway の Protocol C**  
    サーバは WebSocket と HTTP ポーリングの両方を実装しています。Arduino Gateway は既定で WebSocket（`BM_GATEWAY_USE_WEBSOCKET=1`）を使用し、`BM_SERVER_URL` が `https://` の場合は WSS になります。HTTP ポーリングへ戻す場合は `platformio.ini` のフラグを 0 にしてください。CA を `BM_TLS_CA_CERT` で指定しない場合は証明書ピン留めなしになるため、本番では必ず CA を設定してください。
 3. **FTM timestamp** と **NEIGHBOR_REPORT の 2 件/パケット** は仕様未確定のため暫定値です。実装凍結前に [docs/decisions.md](docs/decisions.md) の項目を確定してください。

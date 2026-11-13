@@ -14,6 +14,7 @@ public sealed class MockProvisioningService
     private readonly List<MockProvisioningDevice> _devices;
     private readonly IMonitorEvents _notifier;
     private readonly ILogger<MockProvisioningService> _logger;
+    private int _session;
 
     public MockProvisioningService(IMonitorEvents notifier, ILogger<MockProvisioningService> logger)
     {
@@ -33,8 +34,10 @@ public sealed class MockProvisioningService
     public bool Provision(string id)
     {
         bool shouldFail;
+        int session;
         lock (_gate)
         {
+            session = _session;
             var index = _devices.FindIndex(device =>
                 string.Equals(device.Id, id, StringComparison.Ordinal));
             if (index < 0)
@@ -55,7 +58,7 @@ public sealed class MockProvisioningService
                 UpdatedAt = DateTimeOffset.UtcNow
             };
         }
-        _ = SimulateAsync(id, shouldFail);
+        _ = SimulateAsync(id, shouldFail, session);
         _ = NotifyAsync();
         return true;
     }
@@ -64,75 +67,113 @@ public sealed class MockProvisioningService
     {
         lock (_gate)
         {
+            _session++;
             _devices.Clear();
             _devices.AddRange(CreateInitial());
         }
         _ = NotifyAsync();
     }
 
-    private async Task SimulateAsync(string id, bool shouldFail)
+    private async Task SimulateAsync(string id, bool shouldFail, int session)
     {
         await Task.Delay(TimeSpan.FromMilliseconds(1200));
-        Update(id, device => device with
+        if (!Update(id, session, device => device with
+            {
+                State = "provisioning",
+                Progress = 35,
+                UpdatedAt = DateTimeOffset.UtcNow
+            }))
         {
-            State = "provisioning",
-            Progress = 35,
-            UpdatedAt = DateTimeOffset.UtcNow
-        });
+            return;
+        }
         await NotifyAsync();
 
         await Task.Delay(TimeSpan.FromMilliseconds(1600));
-        Update(id, device => device with
+        if (!Update(id, session, device => device with
+            {
+                State = "provisioning",
+                Progress = 70,
+                UpdatedAt = DateTimeOffset.UtcNow
+            }))
         {
-            State = "provisioning",
-            Progress = 70,
-            UpdatedAt = DateTimeOffset.UtcNow
-        });
+            return;
+        }
         await NotifyAsync();
 
         await Task.Delay(TimeSpan.FromMilliseconds(1800));
         if (shouldFail)
         {
-            Update(id, device => device with
+            if (!Update(id, session, device => device with
+                {
+                    State = "failed",
+                    Progress = 70,
+                    Error = "Provisioning timed out (mock)",
+                    UpdatedAt = DateTimeOffset.UtcNow
+                }))
             {
-                State = "failed",
-                Progress = 70,
-                Error = "Provisioning timed out (mock)",
-                UpdatedAt = DateTimeOffset.UtcNow
-            });
+                return;
+            }
             _logger.LogWarning("mock provisioning failed for {Id}", id);
         }
         else
         {
-            ushort? address = null;
-            lock (_gate)
+            if (!MarkProvisioned(id, session, out var address))
             {
-                address = NextAddressLocked();
+                return;
             }
-            Update(id, device => device with
-            {
-                State = "provisioned",
-                Progress = 100,
-                MeshAddress = address,
-                Error = null,
-                UpdatedAt = DateTimeOffset.UtcNow
-            });
             _logger.LogInformation("mock provisioning completed for {Id} as 0x{Address:X4}",
                 id, address ?? 0);
         }
         await NotifyAsync();
     }
 
-    private void Update(string id, Func<MockProvisioningDevice, MockProvisioningDevice> update)
+    private bool MarkProvisioned(string id, int session, out ushort? address)
+    {
+        address = null;
+        lock (_gate)
+        {
+            if (session != _session)
+            {
+                return false;
+            }
+            var index = _devices.FindIndex(device =>
+                string.Equals(device.Id, id, StringComparison.Ordinal));
+            if (index < 0)
+            {
+                return false;
+            }
+            // Allocate and apply under the same lock so two concurrent
+            // simulations cannot pick the same address.
+            address = NextAddressLocked();
+            _devices[index] = _devices[index] with
+            {
+                State = "provisioned",
+                Progress = 100,
+                MeshAddress = address,
+                Error = null,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            return true;
+        }
+    }
+
+    private bool Update(string id, int session,
+        Func<MockProvisioningDevice, MockProvisioningDevice> update)
     {
         lock (_gate)
         {
+            if (session != _session)
+            {
+                return false;
+            }
             var index = _devices.FindIndex(device =>
                 string.Equals(device.Id, id, StringComparison.Ordinal));
-            if (index >= 0)
+            if (index < 0)
             {
-                _devices[index] = update(_devices[index]);
+                return false;
             }
+            _devices[index] = update(_devices[index]);
+            return true;
         }
     }
 
@@ -164,7 +205,8 @@ public sealed class MockProvisioningService
             "B1A11000000111223344001122334477", null, "failed", 70,
             "Provisioning timed out (mock)", DateTimeOffset.UtcNow),
         new("mock-b-04", "B-Mock-04", "balloon",
-            "B1A11000000111223344001122334488", 0x0142, "provisioning", 60, null, DateTimeOffset.UtcNow),
+            "B1A11000000111223344001122334488", null, "failed", 60,
+            "Provisioning was interrupted (mock)", DateTimeOffset.UtcNow),
         new("mock-b-05", "B-Mock-05", "balloon",
             "B1A11000000111223344001122334499", null, "unprovisioned", 0, null, DateTimeOffset.UtcNow),
         new("mock-gw-01", "GW-Mock-01", "gateway",

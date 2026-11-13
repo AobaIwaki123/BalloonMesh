@@ -14,6 +14,7 @@ public sealed class CommandService
     private readonly IMonitorEvents _notifier;
     private readonly TimeProvider _time;
     private readonly ILogger<CommandService> _logger;
+    private readonly SemaphoreSlim _resetGate = new(1, 1);
 
     public CommandService(
         FleetService fleet,
@@ -107,6 +108,14 @@ public sealed class CommandService
     {
         var target = _fleet.ResolveTarget(request.TargetKind, request.Target);
         var executeAt = request.ExecuteAt.ToUniversalTime();
+        if (executeAt <= _time.GetUtcNow())
+        {
+            // Devices ignore tombstones for ticks they have already passed, so
+            // reporting success here would be a lie.
+            return new CommandResultDto(false,
+                "executeAt must be in the future to cancel a reservation.",
+                0, target.Balloons.Count, null, null);
+        }
         var tick = BalloonProtocol.Tick40FromUnixMs(executeAt.ToUnixTimeMilliseconds());
         var payload = BalloonProtocol.EncodeLedCancel(tick);
         var gateways = _dispatch.SendImmediate(target, BalloonProtocol.OpLedCancel, payload);
@@ -120,7 +129,12 @@ public sealed class CommandService
                 $"No reachable gateway; the cancellation for {target.Description} was not sent.");
         }
 
-        _dispatch.NoteCancel(target.Balloons.Select(balloon => balloon.MeshAddress), tick);
+        foreach (var stepId in _dispatch.NoteCancel(
+                     target.Balloons.Select(balloon => balloon.MeshAddress), tick))
+        {
+            _store.UpdateShowStepStatus(stepId, "canceled");
+        }
+        MarkSentStepsCanceled(target, tick, through: false);
 
         var result = new CommandResultDto(
             true,
@@ -140,6 +154,18 @@ public sealed class CommandService
         {
             return null;
         }
+        if (step.Status is not ("queued" or "sent"))
+        {
+            return new CommandResultDto(false,
+                $"Show step {id} is already {step.Status}.", 0, 0, null, null);
+        }
+        if (step.ExecuteAt <= _time.GetUtcNow())
+        {
+            _store.UpdateShowStepStatus(id, "expired");
+            return new CommandResultDto(false,
+                $"Show step {id} has already executed and cannot be cancelled.",
+                0, 0, null, null);
+        }
         var result = await CancelAsync(
             new LedCancelRequest(step.TargetKind, step.Target, step.ExecuteAt), cancellationToken);
         if (!result.Accepted)
@@ -156,6 +182,11 @@ public sealed class CommandService
     {
         var target = _fleet.ResolveTarget(request.TargetKind, request.Target);
         var addresses = target.Balloons.Select(balloon => balloon.MeshAddress).ToArray();
+        // Serialize reset cutoff allocation through delivery: concurrent
+        // resets must not reuse the same monotonic cutoff.
+        await _resetGate.WaitAsync(cancellationToken);
+        try
+        {
         var requested = request.CutoffAt is { } cutoff
             ? BalloonProtocol.Tick40FromUnixMs(cutoff.ToUniversalTime().ToUnixTimeMilliseconds())
             : BalloonProtocol.NowTick40(_time);
@@ -174,7 +205,11 @@ public sealed class CommandService
                 $"No reachable gateway; the reset for {target.Description} was not sent.");
         }
 
-        _dispatch.NoteCutoff(addresses, cutoffTick);
+        foreach (var stepId in _dispatch.NoteCutoff(addresses, cutoffTick))
+        {
+            _store.UpdateShowStepStatus(stepId, "canceled");
+        }
+        MarkSentStepsCanceled(target, cutoffTick, through: true);
 
         if (request.SetNow)
         {
@@ -196,6 +231,46 @@ public sealed class CommandService
             Convert.ToHexString(payload));
         await _notifier.CommandSentAsync(result);
         return result;
+        }
+        finally
+        {
+            _resetGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// A sent reservation stays in the DB as "sent" after a later cancel or
+    /// reset.  Mark the matching future rows so restart recovery does not seed
+    /// them back into the queue estimate.
+    /// </summary>
+    private void MarkSentStepsCanceled(TargetSpec target, ulong tick, bool through)
+    {
+        var addresses = target.Balloons
+            .Select(balloon => balloon.MeshAddress)
+            .ToHashSet();
+        foreach (var step in _store.GetFutureShowSteps("sent", _time.GetUtcNow()))
+        {
+            var stepTick = BalloonProtocol.Tick40FromUnixMs(
+                step.ExecuteAt.ToUnixTimeMilliseconds());
+            if (through ? stepTick > tick : stepTick != tick)
+            {
+                continue;
+            }
+            TargetSpec stepTarget;
+            try
+            {
+                stepTarget = _fleet.ResolveTarget(step.TargetKind, step.Target);
+            }
+            catch (ArgumentException)
+            {
+                continue;
+            }
+            if (stepTarget.Balloons.Count > 0 &&
+                stepTarget.Balloons.All(balloon => addresses.Contains(balloon.MeshAddress)))
+            {
+                _store.UpdateShowStepStatus(step.Id, "canceled");
+            }
+        }
     }
 
     private async Task<CommandResultDto> RejectImmediateAsync(

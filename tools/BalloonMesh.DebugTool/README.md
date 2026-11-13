@@ -13,11 +13,14 @@ BalloonMesh サーバと BLE Mesh Gateway の動作を、実機なしで確認�
   予約済み Show step の表示とキャンセル。バルーンを選ぶと Commands タブの
   ターゲットに反映されます。
 - **Commands**: LED 即時反映、予約、キャンセル、RESET / RESET_AND_SET。
-  送信結果の opcode / payload / 受信 Gateway 数を表示します。
+  送信結果の opcode / payload / 受信 Gateway 数を表示します。予約時に
+  Execute at が空の場合は実際に使った時刻（UTC・ミリ秒）を欄へ書き戻すため、
+  そのまま Cancel に使えます。Fleet の Show steps も完全な UTC 時刻を表示します。
 - **Gateway simulator**: WebSocket または HTTP ポーリングで擬似 Gateway を
   起動し、サーバからの下りコマンドを Protocol B としてデコード表示します。
   受信一覧の **Open** で payload を Protocol タブへ送れます。
-  FTM_REPORT、QUEUE_STATUS、NEIGHBOR_REPORT を手動またはバッチで注入できます。
+  FTM_REPORT、QUEUE_STATUS、NEIGHBOR_REPORT を手動で注入できます
+  （FTM は 4 anchor 分のバッチ送信にも対応）。
   HTTP ポーリングの TX/RX raw JSON は、実際の HTTP バッチではなく
   メッシュメッセージ単位に合成した `type=mesh` フレームです。
 - **Protocol**: 既知の Vendor Opcode をプリセットから生成し、任意の
@@ -47,6 +50,8 @@ dotnet run --project tools/BalloonMesh.DebugTool/BalloonMesh.DebugTool.csproj
 2. Development サーバなら **Mock login** を押すか、
    別環境なら Session Cookie を貼り付けてから **Connect / Refresh**。
 3. Gateway 共有トークンが必要な環境では **Gateway token** を入力してください。
+   サーバが `Gateway:Token` を設定している場合、未設定・不一致の WebSocket は
+   hello 直後に拒否され、Gateway simulator の Start は失敗として表示されます。
 
 ## 配布用ビルド
 

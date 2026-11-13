@@ -19,7 +19,14 @@ public sealed class DebugToolSettingsTests
                 GatewayId = "gw-test",
                 GatewayTransport = "HTTP",
                 PollWaitMs = 2_500,
-                FtmBatchId = "9"
+                FtmBatchId = "9",
+                Red = "10",
+                Green = "20",
+                Blue = "30",
+                ExecuteAt = "2026-11-12T00:00:00.123+00:00",
+                ResetSetNow = true,
+                FtmTimestamp = "12345",
+                ExpandShortOpcode = false
             };
 
             settings.Save(path);
@@ -30,6 +37,13 @@ public sealed class DebugToolSettingsTests
             Assert.Equal("HTTP", loaded.GatewayTransport);
             Assert.Equal(2_500, loaded.PollWaitMs);
             Assert.Equal("9", loaded.FtmBatchId);
+            Assert.Equal("10", loaded.Red);
+            Assert.Equal("20", loaded.Green);
+            Assert.Equal("30", loaded.Blue);
+            Assert.Equal("2026-11-12T00:00:00.123+00:00", loaded.ExecuteAt);
+            Assert.True(loaded.ResetSetNow);
+            Assert.Equal("12345", loaded.FtmTimestamp);
+            Assert.False(loaded.ExpandShortOpcode);
             Assert.False(File.Exists(path + ".tmp"));
         }
         finally

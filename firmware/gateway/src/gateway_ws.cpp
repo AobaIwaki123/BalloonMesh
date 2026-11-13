@@ -8,6 +8,7 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -77,16 +78,16 @@ static void build_uri(void) {
     snprintf(s_uri, sizeof(s_uri), "%s%.*s/ws/gateway", scheme, (int)rest_len, rest);
 }
 
-static void send_hello(void) {
+static bool send_hello(void) {
     char hello[256];
     snprintf(hello, sizeof(hello),
              "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
              "\"token\":\"%s\",\"provisioned\":%s,\"spoolPending\":%u}",
              BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
-             bm_gateway_mesh_is_provisioned() ? "true" : "false",
+             bm_gateway_mesh_is_ready() ? "true" : "false",
              (unsigned)bm_gateway_spool_count());
-    esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
-                                   pdMS_TO_TICKS(3000));
+    return esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
+                                          pdMS_TO_TICKS(3000)) >= 0;
 }
 
 static void handle_downlink(const char *text, int length) {
@@ -158,31 +159,46 @@ static void websocket_event_handler(void *arg, esp_event_base_t base, int32_t id
 
 static void ws_sender_task(void *argument) {
     (void)argument;
+    bool last_ready = false;
     for (;;) {
         if (!s_connected || s_client == NULL) {
+            last_ready = false;
             vTaskDelay(pdMS_TO_TICKS(500));
             continue;
         }
+        // The initial hello is sent before provisioning/AppKey binding may
+        // finish.  Send a fresh hello when readiness changes so the server
+        // starts routing downlinks without waiting for a reconnect.  Only
+        // commit the transition after a successful send.
+        bool ready = bm_gateway_mesh_is_ready();
+        if (ready != last_ready && send_hello()) {
+            last_ready = ready;
+        }
         bm_gateway_event_t event;
-        if (!bm_gateway_spool_peek(0, &event)) {
+        uint32_t sequence = 0;
+        if (!bm_gateway_spool_peek_seq(0, &event, &sequence)) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
         char hex[17];
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        uint32_t age_ms = event.received_ms == 0
+                              ? 120000u
+                              : now_ms - event.received_ms;
         hex_encode(event.payload, event.length, hex, sizeof(hex));
-        char json[320];
+        char json[352];
         int length = snprintf(json, sizeof(json),
                               "{\"type\":\"mesh\",\"src\":%u,\"dst\":%u,\"opcode\":%lu,"
-                              "\"payload\":\"%s\",\"rssi\":%d,\"ttl\":%u}",
+                              "\"payload\":\"%s\",\"rssi\":%d,\"ttl\":%u,\"ageMs\":%lu}",
                               event.src, event.dst, (unsigned long)event.opcode, hex,
-                              event.rssi, event.ttl);
+                              event.rssi, event.ttl, (unsigned long)age_ms);
         if (length > 0 && length < (int)sizeof(json)) {
             int sent = esp_websocket_client_send_text(s_client, json, length,
                                                       pdMS_TO_TICKS(3000));
             if (sent < 0) {
                 ESP_LOGW(TAG, "send failed; retaining event");
             } else {
-                bm_gateway_spool_drop(1);
+                bm_gateway_spool_drop_through(sequence);
             }
         }
     }

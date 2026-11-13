@@ -57,9 +57,13 @@ public partial class MainWindowViewModel
         var (r, g, b) = ParseColor();
         var executeAt = ParseUtcOr(ExecuteAt, "Execute at",
             DateTimeOffset.UtcNow.AddSeconds(10));
+        // Show the exact time the server will use.  A blank field previously
+        // hid the fallback, so the matching Cancel could never be issued.
+        ExecuteAt = executeAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         var result = await client.SendLedSetAsync(new LedSetCommand(
             TargetKind, Target.Trim(), executeAt, r, g, b)).ConfigureAwait(true);
         ApplyCommandResult(result);
+        await RefreshCoreAsync(client).ConfigureAwait(true);
     });
 
     [RelayCommand]

@@ -24,10 +24,16 @@ public sealed class DebugToolSettings
     public string TargetKind { get; set; } = "all";
     public string Target { get; set; } = "all";
     public string ResetCutoff { get; set; } = string.Empty;
+    public bool ResetSetNow { get; set; }
+    public string Red { get; set; } = "255";
+    public string Green { get; set; } = "255";
+    public string Blue { get; set; } = "255";
+    public string ExecuteAt { get; set; } = string.Empty;
     public string InjectSource { get; set; } = "0x0101";
     public string InjectDst { get; set; } = "0xC011";
     public string FtmAnchor { get; set; } = "1";
     public string FtmDistanceCm { get; set; } = "3000";
+    public string FtmTimestamp { get; set; } = string.Empty;
     public string FtmBatchId { get; set; } = "1";
     public string QueueKind { get; set; } = "NearFull";
     public string QueueCount { get; set; } = "401";
@@ -37,6 +43,7 @@ public sealed class DebugToolSettings
     public string NeighborARssi { get; set; } = "-45";
     public string NeighborB { get; set; } = "0x0103";
     public string NeighborBRssi { get; set; } = "-60";
+    public bool ExpandShortOpcode { get; set; } = true;
 
     public static string DefaultPath
     {

@@ -104,6 +104,10 @@ public sealed class LedDispatchService
         }
     }
 
+    /// <summary>
+    /// Returns the monotonic cutoff that would be used, without committing it.
+    /// NoteCutoff commits only after a reset was actually delivered.
+    /// </summary>
     public ulong NextCutoffTick(IEnumerable<ushort> addresses, ulong requested)
     {
         lock (_gate)
@@ -116,37 +120,90 @@ public sealed class LedDispatchService
                     value = last + 1;
                 }
             }
-            foreach (var address in addresses)
-            {
-                _lastCutoff[address] = value;
-            }
             return value;
         }
     }
 
-    public void NoteCutoff(IEnumerable<ushort> addresses, ulong cutoffTick)
+    public IReadOnlyList<long> NoteCutoff(IEnumerable<ushort> addresses, ulong cutoffTick)
     {
+        var targets = addresses.ToHashSet();
+        var removed = new List<long>();
         lock (_gate)
         {
-            foreach (var address in addresses)
+            // A RESET that reached a gateway also applies to reservations that
+            // are still pending locally; dispatching them afterwards would
+            // resurrect commands the user already cancelled.
+            removed.AddRange(RemovePending(item =>
+                item.ExecuteTick <= cutoffTick && CoveredBy(item.Target, targets)));
+            foreach (var address in targets)
             {
                 var estimate = GetEstimate(address);
                 estimate.SentTicks.RemoveAll(tick => tick <= cutoffTick);
                 estimate.LastCutoff = Math.Max(estimate.LastCutoff, cutoffTick);
+                estimate.ReportedCount = 0;
+                estimate.ReportedAtTick = 0;
+                estimate.LastDecayTick = 0;
+                _lastCutoff[address] = Math.Max(
+                    _lastCutoff.GetValueOrDefault(address), cutoffTick);
                 WriteEstimate(address, estimate);
             }
         }
+        return removed;
     }
 
-    public void NoteCancel(IEnumerable<ushort> addresses, ulong executeTick)
+    public IReadOnlyList<long> NoteCancel(IEnumerable<ushort> addresses, ulong executeTick)
+    {
+        var targets = addresses.ToHashSet();
+        var removed = new List<long>();
+        lock (_gate)
+        {
+            removed.AddRange(RemovePending(item =>
+                item.ExecuteTick == executeTick && CoveredBy(item.Target, targets)));
+            foreach (var address in targets)
+            {
+                var estimate = GetEstimate(address);
+                var removedTicks = estimate.SentTicks.RemoveAll(tick => tick == executeTick);
+                if (removedTicks > 0 && estimate.ReportedCount > 0)
+                {
+                    // The device tombstone removes the reservation, so the
+                    // reported depth no longer includes it.
+                    estimate.ReportedCount--;
+                }
+                WriteEstimate(address, estimate);
+            }
+        }
+        return removed;
+    }
+
+    /// <summary>
+    /// Rebuilds the estimate from a reservation that was already marked sent
+    /// before a server restart.  Without this the dispatcher assumes an empty
+    /// device queue and can overfill it after recovery.
+    /// </summary>
+    public void SeedSentReservations(
+        IReadOnlyList<(TargetSpec Target, ulong ExecuteTick)> reservations)
     {
         lock (_gate)
         {
-            foreach (var address in addresses)
+            var estimates = new Dictionary<ushort, QueueEstimate>();
+            foreach (var (target, executeTick) in reservations)
             {
-                var estimate = GetEstimate(address);
-                estimate.SentTicks.RemoveAll(tick => tick == executeTick);
-                WriteEstimate(address, estimate);
+                foreach (var balloon in target.Balloons)
+                {
+                    if (!estimates.TryGetValue(balloon.MeshAddress, out var estimate))
+                    {
+                        estimate = GetEstimate(balloon.MeshAddress);
+                        estimates[balloon.MeshAddress] = estimate;
+                    }
+                    if (!estimate.SentTicks.Contains(executeTick))
+                    {
+                        estimate.SentTicks.Add(executeTick);
+                    }
+                }
+            }
+            foreach (var pair in estimates)
+            {
+                WriteEstimate(pair.Key, pair.Value);
             }
         }
     }
@@ -156,7 +213,12 @@ public sealed class LedDispatchService
         lock (_gate)
         {
             var estimate = GetEstimate(address);
+            // Keep the reported depth as-is.  Firmware sends it periodically,
+            // and EffectiveCount decays it as known reservations execute so it
+            // cannot pin the estimate at a stale value.
             estimate.ReportedCount = count;
+            estimate.ReportedAtTick = BalloonProtocol.NowTick40(_time);
+            estimate.LastDecayTick = estimate.ReportedAtTick;
             WriteEstimate(address, estimate);
         }
     }
@@ -180,12 +242,6 @@ public sealed class LedDispatchService
         lock (_gate)
         {
             var selectedCounts = new Dictionary<ushort, int>();
-            foreach (var address in _estimates.Keys.ToArray())
-            {
-                var estimate = GetEstimate(address);
-                estimate.SentTicks.RemoveAll(tick => tick + 300 <= nowTick); // 3 s grace
-            }
-
             foreach (var item in _pending)
             {
                 if (item.ExecuteAt <= now)
@@ -284,6 +340,33 @@ public sealed class LedDispatchService
         return sent;
     }
 
+    /// <summary>
+    /// True only when the cancel/reset addresses cover the reservation's whole
+    /// target.  A unicast cancel must not delete an all-balloon reservation.
+    /// </summary>
+    private static bool CoveredBy(TargetSpec target, HashSet<ushort> addresses) =>
+        target.Balloons.Count > 0 &&
+        target.Balloons.All(balloon => addresses.Contains(balloon.MeshAddress));
+
+    private List<long> RemovePending(Func<PendingReservation, bool> predicate)
+    {
+        var removed = new List<long>();
+        for (var i = _pending.Count - 1; i >= 0; i--)
+        {
+            var item = _pending[i];
+            if (!predicate(item))
+            {
+                continue;
+            }
+            _pending.RemoveAt(i);
+            if (item.ShowStepId is { } showStepId)
+            {
+                removed.Add(showStepId);
+            }
+        }
+        return removed;
+    }
+
     private QueueEstimate GetEstimate(ushort address) =>
         _estimates.TryGetValue(address, out var estimate) ? estimate : new QueueEstimate();
 
@@ -304,12 +387,27 @@ public sealed class LedDispatchService
     {
         public List<ulong> SentTicks { get; } = [];
         public int ReportedCount { get; set; }
+        public ulong ReportedAtTick { get; set; }
+        public ulong LastDecayTick { get; set; }
         public ulong LastCutoff { get; set; }
 
         public int EffectiveCount(ulong nowTick)
         {
-            SentTicks.RemoveAll(tick => tick <= nowTick);
-            return Math.Clamp(Math.Max(ReportedCount, SentTicks.Count), 0, HardQueueDepth);
+            if (ReportedCount > 0 && ReportedAtTick > 0)
+            {
+                var from = Math.Max(LastDecayTick, ReportedAtTick);
+                if (nowTick > from)
+                {
+                    var executed = SentTicks.Count(tick => tick > from && tick <= nowTick);
+                    ReportedCount = Math.Max(0, ReportedCount - executed);
+                    LastDecayTick = nowTick;
+                }
+            }
+            SentTicks.RemoveAll(tick => tick + 300 <= nowTick); // 3 s grace
+            // Executed ticks are kept briefly so the decay above can see them,
+            // but they are no longer part of the device's future queue.
+            var pending = SentTicks.Count(tick => tick > nowTick);
+            return Math.Clamp(Math.Max(ReportedCount, pending), 0, HardQueueDepth);
         }
     }
 

@@ -513,8 +513,14 @@ public sealed class DataStore
             command.CommandText = """
                 UPDATE balloons
                 SET initial_lat = @lat, initial_lon = @lon,
-                    lat = COALESCE(lat, @lat), lon = COALESCE(lon, @lon),
-                    last_method = 'initial', updated_at = @updated
+                    lat = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                               THEN @lat ELSE lat END,
+                    lon = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                               THEN @lon ELSE lon END,
+                    last_method = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                                       THEN 'initial' ELSE last_method END,
+                    updated_at = CASE WHEN last_method IS NULL OR last_method IN ('seed', 'initial')
+                                      THEN @updated ELSE updated_at END
                 WHERE mesh_address = @addr;
                 """;
             command.Parameters.AddWithValue("lat", lat);
@@ -688,6 +694,27 @@ public sealed class DataStore
         }
     }
 
+    public IReadOnlyList<ShowStepRecord> GetFutureShowSteps(string status, DateTimeOffset after)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, name, target_kind, target, execute_at, r, g, b, status
+            FROM show_steps
+            WHERE status = @status AND execute_at > @after
+            ORDER BY execute_at, id;
+            """;
+        command.Parameters.AddWithValue("status", status);
+        command.Parameters.AddWithValue("after", after);
+        using var reader = command.ExecuteReader();
+        var result = new List<ShowStepRecord>();
+        while (reader.Read())
+        {
+            result.Add(ReadShowStep(reader));
+        }
+        return result;
+    }
+
     public IReadOnlyList<ShowStepRecord> GetPendingShowSteps(DateTimeOffset after)
     {
         using var connection = Open();
@@ -703,14 +730,16 @@ public sealed class DataStore
         var result = new List<ShowStepRecord>();
         while (reader.Read())
         {
-            result.Add(new ShowStepRecord(
-                reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                reader.GetFieldValue<DateTimeOffset>(4),
-                (byte)reader.GetInt16(5), (byte)reader.GetInt16(6), (byte)reader.GetInt16(7),
-                reader.GetString(8)));
+            result.Add(ReadShowStep(reader));
         }
         return result;
     }
+
+    private static ShowStepRecord ReadShowStep(NpgsqlDataReader reader) => new(
+        reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+        reader.GetFieldValue<DateTimeOffset>(4),
+        (byte)reader.GetInt16(5), (byte)reader.GetInt16(6), (byte)reader.GetInt16(7),
+        reader.GetString(8));
 
     public ShowStepRecord? GetShowStep(long id)
     {
@@ -722,15 +751,7 @@ public sealed class DataStore
             """;
         command.Parameters.AddWithValue("id", id);
         using var reader = command.ExecuteReader();
-        if (!reader.Read())
-        {
-            return null;
-        }
-        return new ShowStepRecord(
-            reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-            reader.GetFieldValue<DateTimeOffset>(4),
-            (byte)reader.GetInt16(5), (byte)reader.GetInt16(6), (byte)reader.GetInt16(7),
-            reader.GetString(8));
+        return reader.Read() ? ReadShowStep(reader) : null;
     }
 
     public void UpdateShowStepStatus(long id, string status)
@@ -759,16 +780,7 @@ public sealed class DataStore
         var result = new List<ShowStepRecord>();
         while (reader.Read())
         {
-            result.Add(new ShowStepRecord(
-                reader.GetInt64(0),
-                reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                reader.GetFieldValue<DateTimeOffset>(4),
-                (byte)reader.GetInt16(5),
-                (byte)reader.GetInt16(6),
-                (byte)reader.GetInt16(7),
-                reader.GetString(8)));
+            result.Add(ReadShowStep(reader));
         }
         return result;
     }

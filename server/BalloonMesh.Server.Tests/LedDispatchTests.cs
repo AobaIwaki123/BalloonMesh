@@ -92,6 +92,7 @@ public sealed class LedDispatchTests
         var second = dispatch.NextIssuedTick([0x0101]);
         Assert.True(second > first);
         var cutoff = dispatch.NextCutoffTick([0x0101], 10);
+        dispatch.NoteCutoff([0x0101], cutoff);
         var laterCutoff = dispatch.NextCutoffTick([0x0101], 10);
         Assert.True(laterCutoff > cutoff);
     }

@@ -20,6 +20,9 @@ typedef struct {
 
 void bm_gateway_mesh_init(void);
 bool bm_gateway_mesh_is_provisioned(void);
+/* True only when provisioning is complete and both vendor models are bound to
+ * the AppKey.  Downlinks can only be sent in this state. */
+bool bm_gateway_mesh_is_ready(void);
 uint16_t bm_gateway_mesh_primary_addr(void);
 bool bm_gateway_mesh_send(uint16_t dst,
                           uint32_t opcode,

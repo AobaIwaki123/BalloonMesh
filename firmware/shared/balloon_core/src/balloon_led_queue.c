@@ -288,7 +288,10 @@ int bm_queue_monitor_update(bm_queue_monitor_t *monitor, uint16_t queue_count) {
     if (!monitor->initialized) {
         monitor->initialized = true;
         monitor->near_full = queue_count >= 401u;
-        return 0;
+        /* A node that boots with a restored near-full queue must announce it;
+         * otherwise the server can keep dispatching until the device drops
+         * reservations at the 512-entry hard limit. */
+        return monitor->near_full ? 1 : 0;
     }
     if (!monitor->near_full && queue_count >= 401u) {
         monitor->near_full = true;

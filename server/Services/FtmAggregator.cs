@@ -50,6 +50,13 @@ public sealed class FtmAggregator
 
         lock (_gate)
         {
+            // Re-check under the lock: a close may have raced with the fast
+            // path above, and a stale report must not recreate a closed batch.
+            if (_closed.TryGetValue(key, out var closedAtLocked)
+                && receivedAt - closedAtLocked < TimeSpan.FromMinutes(2))
+            {
+                return;
+            }
             if (_batches.TryGetValue(key, out var closed) && closed.Closed)
             {
                 return;
@@ -88,14 +95,78 @@ public sealed class FtmAggregator
         }
     }
 
-    public Task<int> ProcessDueAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Registers that neighbor observations exist for this batch.  If no FTM
+    /// report has arrived yet (for example because every anchor was
+    /// unreachable), opening a batch here lets the neighbor-only fallback
+    /// produce a position instead of being discarded.
+    /// </summary>
+    public void NoteNeighborReport(ushort source, byte batchId, DateTimeOffset receivedAt,
+        bool observationsChanged)
+    {
+        var key = new BatchKey(source, batchId);
+        if (_closed.TryGetValue(key, out var closedAt)
+            && receivedAt - closedAt < TimeSpan.FromMinutes(2))
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (_closed.TryGetValue(key, out var closedAtLocked)
+                && receivedAt - closedAtLocked < TimeSpan.FromMinutes(2))
+            {
+                return;
+            }
+            var opened = false;
+            if (!_batches.TryGetValue(key, out var batch))
+            {
+                batch = new BatchState(receivedAt);
+                _batches[key] = batch;
+                opened = true;
+                _logger.LogInformation(
+                    "neighbor-only batch {Source:X4}/{Batch} opened at {T0:O}",
+                    source, batchId, receivedAt);
+            }
+            if (batch.Closed)
+            {
+                return;
+            }
+            batch.HasNeighborReport = true;
+            // Duplicate reports from a second gateway must not force another
+            // identical compute/history sample.
+            if (opened || observationsChanged)
+            {
+                batch.Changed = true;
+            }
+        }
+    }
+
+    public async Task<int> ProcessDueAsync(DateTimeOffset now,
+        CancellationToken cancellationToken = default)
     {
         List<PendingCompute>? due;
         lock (_gate)
         {
             due = TickLocked(now);
         }
-        return due is null ? Task.FromResult(0) : ComputeAsync(due, cancellationToken);
+        if (due is null)
+        {
+            return 0;
+        }
+        try
+        {
+            return await ComputeAsync(due, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Cleanup must happen even if the anchor query or an early item
+            // throws before the per-item final handler runs.
+            foreach (var item in due.Where(item => item.IsFinal))
+            {
+                _neighbors.Remove(item.Key.Source, item.Key.Batch);
+            }
+        }
     }
 
     private List<PendingCompute>? TickLocked(DateTimeOffset now)
@@ -118,7 +189,15 @@ public sealed class FtmAggregator
                 continue;
             }
 
-            if (batch.Reports.Count > 0)
+            // At close time only compute again when a report actually changed;
+            // an unchanged batch would otherwise insert a duplicate position
+            // sample and a duplicate balloon update.
+            var shouldCompute = batch.Reports.Count > 0 || batch.HasNeighborReport;
+            if (closeDue && batch.InitialComputed && !batch.Changed)
+            {
+                shouldCompute = false;
+            }
+            if (shouldCompute)
             {
                 due ??= [];
                 due.Add(new PendingCompute(
@@ -131,13 +210,17 @@ public sealed class FtmAggregator
 
             batch.InitialComputed = true;
             batch.Changed = false;
+            batch.HasNeighborReport = false;
             if (closeDue)
             {
                 batch.Closed = true;
                 _batches.Remove(key);
                 _closed[key] = now;
-                if (batch.Reports.Count == 0)
+                if (!shouldCompute)
                 {
+                    // No final compute will read the observations, so they can
+                    // be removed now.  When a final compute is scheduled,
+                    // ComputeAsync removes them in its finally block.
                     _neighbors.Remove(key.Source, key.Batch);
                 }
             }
@@ -155,7 +238,9 @@ public sealed class FtmAggregator
 
     private async Task<int> ComputeAsync(IReadOnlyList<PendingCompute> due, CancellationToken cancellationToken)
     {
-        var anchors = _fleet.GetAnchors().ToDictionary(anchor => (byte)anchor.AnchorId);
+        var anchors = _fleet.GetAnchors()
+            .Where(anchor => anchor.PositionValid)
+            .ToDictionary(anchor => (byte)anchor.AnchorId);
         var computed = 0;
         foreach (var item in due)
         {
@@ -232,13 +317,6 @@ public sealed class FtmAggregator
                 _logger.LogError(exception, "position computation failed for {Source:X4}/{Batch}",
                     item.Key.Source, item.Key.Batch);
             }
-            finally
-            {
-                if (item.IsFinal)
-                {
-                    _neighbors.Remove(item.Key.Source, item.Key.Batch);
-                }
-            }
         }
         return computed;
     }
@@ -268,6 +346,7 @@ public sealed class FtmAggregator
         public HashSet<(byte Anchor, ushort Distance, uint Timestamp)> Seen { get; } = [];
         public bool InitialComputed { get; set; }
         public bool Changed { get; set; }
+        public bool HasNeighborReport { get; set; }
         public bool Closed { get; set; }
     }
 

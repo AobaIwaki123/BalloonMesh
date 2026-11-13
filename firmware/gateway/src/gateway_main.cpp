@@ -7,6 +7,7 @@
 
 #include "cJSON.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -45,6 +46,8 @@ private:
     WiFiClientSecure secure_;
 };
 
+#if !defined(BM_GATEWAY_USE_WEBSOCKET) || !BM_GATEWAY_USE_WEBSOCKET
+
 static void hex_encode(const uint8_t *data, size_t length, char *out, size_t out_size) {
     static const char digits[] = "0123456789ABCDEF";
     size_t position = 0;
@@ -82,8 +85,6 @@ static bool server_available(void) {
     return WiFi.status() == WL_CONNECTED;
 }
 
-#if !defined(BM_GATEWAY_USE_WEBSOCKET) || !BM_GATEWAY_USE_WEBSOCKET
-
 static void upload_events_task(void *argument) {
     (void)argument;
     GatewayHttpClient transport;
@@ -93,12 +94,9 @@ static void upload_events_task(void *argument) {
             continue;
         }
         bm_gateway_event_t events[12];
-        uint16_t count = 0;
-        uint16_t available = bm_gateway_spool_count();
-        while (count < 12 && count < available &&
-               bm_gateway_spool_peek((uint16_t)count, &events[count])) {
-            count++;
-        }
+        uint32_t sequences[12];
+        uint16_t count = bm_gateway_spool_snapshot(events, sequences, 12);
+        uint32_t last_sequence = count > 0 ? sequences[count - 1] : 0;
         if (count == 0) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
@@ -114,22 +112,27 @@ static void upload_events_task(void *argument) {
                                "{\"gatewayId\":\"%s\",\"firmware\":\"%s\","
                                "\"provisioned\":%s,\"spoolPending\":%u,\"events\":[",
                                BM_GATEWAY_ID, BM_FIRMWARE_VERSION,
-                               bm_gateway_mesh_is_provisioned() ? "true" : "false",
+                               bm_gateway_mesh_is_ready() ? "true" : "false",
                                (unsigned)bm_gateway_spool_count());
         bool body_ok = written > 0 && (size_t)written < capacity;
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
         for (uint16_t i = 0; body_ok && i < count; ++i) {
             char hex[17];
+            uint32_t age_ms = events[i].received_ms == 0
+                                  ? 120000u
+                                  : now_ms - events[i].received_ms;
             hex_encode(events[i].payload, events[i].length, hex, sizeof(hex));
             size_t remaining = capacity - (size_t)written;
             int appended = snprintf(body + written, remaining,
                                 "%s{\"src\":%u,\"dst\":%u,\"opcode\":%lu,"
                                 "\"payload\":\"%s\",\"rssi\":%d,\"ttl\":%u,"
-                                "\"receivedMs\":%lu}",
+                                "\"receivedMs\":%lu,\"ageMs\":%lu}",
                                 i == 0 ? "" : ",",
                                 events[i].src, events[i].dst,
                                 (unsigned long)events[i].opcode, hex,
                                 events[i].rssi, events[i].ttl,
-                                (unsigned long)events[i].received_ms);
+                                (unsigned long)events[i].received_ms,
+                                (unsigned long)age_ms);
             if (appended < 0 || (size_t)appended >= remaining) {
                 body_ok = false;
                 break;
@@ -161,7 +164,7 @@ static void upload_events_task(void *argument) {
             }
             int code = http.POST((uint8_t *)body, strlen(body));
             if (code >= 200 && code < 300) {
-                bm_gateway_spool_drop(count);
+                bm_gateway_spool_drop_through(last_sequence);
             } else {
                 ESP_LOGW(TAG, "upload failed HTTP %d; retaining %u events",
                          code, (unsigned)count);
@@ -180,7 +183,7 @@ static void poll_commands_task(void *argument) {
     (void)argument;
     GatewayHttpClient transport;
     for (;;) {
-        if (!server_available() || !bm_gateway_mesh_is_provisioned()) {
+        if (!server_available() || !bm_gateway_mesh_is_ready()) {
             vTaskDelay(pdMS_TO_TICKS(2000));
             continue;
         }
@@ -245,7 +248,9 @@ static void wifi_task(void *argument) {
     (void)argument;
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false);
+    /* ESP32-C3 shares one radio between Wi-Fi and BLE Mesh.  Keep modem sleep
+     * enabled for coexistence (the balloon firmware does the same). */
+    WiFi.setSleep(true);
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
             ESP_LOGI(TAG, "connecting Wi-Fi SSID=%s", BM_GATEWAY_WIFI_SSID);
