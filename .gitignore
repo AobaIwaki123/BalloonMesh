@@ -29,3 +29,9 @@ third_party/SvelteSharp/**/obj/
 *.db-wal
 TestResults/
 *.log
+.worktrees/
+
+# Secrets & Environment files
+.env
+.env.*
+!.env.example

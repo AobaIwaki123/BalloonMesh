@@ -58,7 +58,44 @@ git submodule update --init --recursive
 
 ## クイックスタート
 
-### 1. PostgreSQL
+### 0. Docker Compose での起動（推奨・最も簡単）
+
+ローカルの .NET 10 SDK や PostgreSQL の手動インストールを行わずに、Docker Compose でサーバとデータベースを一括起動できます。
+
+```bash
+# デモモード（仮想バルーン50台を自動生成してUI上で確認、デフォルト）
+docker compose up -d --build
+
+# 本番・実機モード（シミュレーションを停止し、物理ESP32 Gatewayの接続を待受）
+SIMULATION_ENABLED=false docker compose up -d --build
+```
+
+- Web UI: <http://localhost:5080/>
+- ログ確認: `docker compose logs -f server`
+- 停止: `docker compose down`
+
+---
+
+### 1. クラウド / AWS Lightsail へのデプロイ
+
+常時接続 WebSocket (`/ws/gateway`, `/hubs/monitor`) や測位バッチ集約ワーカーが稼働するため、Vercel 等のサーバーレスではなく常時起動 VPS（Amazon Lightsail 等）でのホスティングを推奨します。手元から 1 コマンドで作成・更新・破棄ができるスクリプトを用意しています：
+
+```bash
+# デプロイ（インスタンスが無ければ自動新規作成、既にあれば差分更新）
+./scripts/lightsail-deploy.sh
+
+# 本番実機モード（シミュレーション停止、物理ESP32待受）でデプロイ
+./scripts/lightsail-deploy.sh --prod
+
+# 破棄（インスタンス削除・課金停止）
+./scripts/lightsail-destroy.sh
+```
+
+必要最小限の **IAM 権限設定（インラインポリシー）**、オプション一覧、コスト試算などの詳細は **[docs/deployment.md](docs/deployment.md)** を参照してください。
+
+---
+
+### 2. ローカル直接起動 (dotnet run) の場合
 
 ローカル PostgreSQL 16 を想定しています。開発用ロールと DB を作成します。
 
