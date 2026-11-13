@@ -16,10 +16,13 @@ set -euo pipefail
 #   --name <NAME>    インスタンス名（デフォルト: balloonmesh-server）
 #   --key <PATH>     SSH秘密鍵のパス（未指定時は ~/.ssh/ から自動検出）
 #   --bundle <ID>    プラン（small_3_0: 2GB/$12, micro_3_0: 1GB/$7。デフォルト: small_3_0）
+#   --token <TOKEN>  Gateway 認証トークン
+#   --allow-cidr <CIDR> 5080ポートの接続元IP制限（例: 219.104.138.249/32。未指定時は全開放）
 #
 # Examples:
 #   ./scripts/lightsail-deploy.sh                # デモモードで自動作成または更新
 #   ./scripts/lightsail-deploy.sh --prod         # 本番実機モードでデプロイ
+#   ./scripts/lightsail-deploy.sh --prod --token secret123 --allow-cidr 219.104.138.249/32
 #   ./scripts/lightsail-deploy.sh --bundle micro_3_0  # $7/月の最小プランで作成
 # -----------------------------------------------------------------------------
 
@@ -28,6 +31,7 @@ KEY_PATH="${LIGHTSAIL_KEY:-}"
 BUNDLE_ID="small_3_0"
 MODE="--demo"
 GATEWAY_TOKEN="${GATEWAY_TOKEN:-}"
+ALLOW_CIDR=""
 REGION="${AWS_DEFAULT_REGION:-ap-northeast-1}"
 PORT="5080"
 REMOTE_USER="ubuntu"
@@ -58,6 +62,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --token)
       GATEWAY_TOKEN="$2"
+      shift 2
+      ;;
+    --allow-cidr)
+      ALLOW_CIDR="$2"
       shift 2
       ;;
     *)
@@ -143,10 +151,17 @@ EOF
     done
 
     # ポート開放
-    echo "==> ポート ${PORT} を開放しています..."
+    if [[ -n "$ALLOW_CIDR" ]]; then
+      [[ "$ALLOW_CIDR" != *"/"* ]] && ALLOW_CIDR="${ALLOW_CIDR}/32"
+      PORT_INFO="fromPort=${PORT},toPort=${PORT},protocol=tcp,cidrs=${ALLOW_CIDR}"
+      echo "==> ポート ${PORT} を CIDR [${ALLOW_CIDR}] に制限して開放しています..."
+    else
+      PORT_INFO="fromPort=${PORT},toPort=${PORT},protocol=tcp"
+      echo "==> ポート ${PORT} を全開放しています (0.0.0.0/0)..."
+    fi
     aws lightsail open-instance-public-ports \
       --instance-name "$INSTANCE_NAME" \
-      --port-info fromPort="$PORT",toPort="$PORT",protocol=tcp >/dev/null
+      --port-info "$PORT_INFO" >/dev/null
 
     # SSH & Docker の準備待機
     echo "==> SSH および Docker の準備完了を待機しています..."
@@ -156,6 +171,15 @@ EOF
   else
     HOST=$(aws lightsail get-instance --instance-name "$INSTANCE_NAME" --query "instance.publicIpAddress" --output text)
     echo "==> 既存のインスタンス [${INSTANCE_NAME}] (IP: ${HOST}) にデプロイします。"
+    
+    if [[ -n "$ALLOW_CIDR" ]]; then
+      [[ "$ALLOW_CIDR" != *"/"* ]] && ALLOW_CIDR="${ALLOW_CIDR}/32"
+      PORT_INFO="fromPort=${PORT},toPort=${PORT},protocol=tcp,cidrs=${ALLOW_CIDR}"
+      echo "==> ポート ${PORT} の許可 CIDR を [${ALLOW_CIDR}] に更新しています..."
+      aws lightsail open-instance-public-ports \
+        --instance-name "$INSTANCE_NAME" \
+        --port-info "$PORT_INFO" >/dev/null || true
+    fi
   fi
 fi
 
