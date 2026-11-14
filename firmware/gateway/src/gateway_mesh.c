@@ -17,7 +17,9 @@
 #include "esp_ble_mesh_provisioning_api.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "balloon_protocol.h"
 #include "bm_config.h"
@@ -44,6 +46,25 @@ static uint32_t s_bind_retry_delay_ms = 1000;
 static uint8_t s_bind_retry_attempts;
 static esp_timer_handle_t s_prov_retry_timer;
 static uint32_t s_prov_retry_delay_ms = 1000;
+
+/* Paced downlink queue.  See bm_gateway_mesh_enqueue() in the header. */
+#define BM_DOWNLINK_QUEUE_LENGTH 96
+/* One non-segmented access message with net_transmit(2, 20) occupies the
+ * advertising bearer for roughly this long. */
+#define BM_DOWNLINK_GAP_MS 60u
+#define BM_DOWNLINK_RETRY_DELAY_MS 200u
+#define BM_DOWNLINK_MAX_ATTEMPTS 5
+
+typedef struct {
+    uint16_t dst;
+    uint32_t opcode;
+    uint8_t ttl;
+    uint8_t length;
+    uint8_t payload[8];
+} bm_downlink_t;
+
+static QueueHandle_t s_downlink_queue;
+static void downlink_task(void *argument);
 
 static bool vendor_models_ready(void) {
     if (s_state_events == NULL) {
@@ -548,6 +569,11 @@ void bm_gateway_mesh_init(void) {
         ESP_LOGE(TAG, "mesh state mutex creation failed");
         return;
     }
+    s_downlink_queue = xQueueCreate(BM_DOWNLINK_QUEUE_LENGTH, sizeof(bm_downlink_t));
+    if (s_downlink_queue == NULL) {
+        ESP_LOGE(TAG, "downlink queue creation failed");
+        return;
+    }
     ESP_LOGI(TAG, "step 2: timers");
     const esp_timer_create_args_t bind_retry_args = {
         .callback = bind_retry_timer_cb,
@@ -588,7 +614,9 @@ void bm_gateway_mesh_init(void) {
 
     ESP_LOGI(TAG, "step 10: auto prov");
 #if defined(BM_DEV_AUTO_PROV) && BM_DEV_AUTO_PROV
-    int auto_err = bm_dev_auto_provision(0x0001, BM_GROUP_GATEWAY);
+    const uint16_t dev_addr = bm_device_dev_unicast(0x0002u, 0x00FEu);
+    ESP_LOGW(TAG, "BM_DEV_AUTO_PROV: bench provisioning with addr=0x%04x", dev_addr);
+    int auto_err = bm_dev_auto_provision(dev_addr, BM_GROUP_GATEWAY);
     if (auto_err == 0) {
         state_lock();
         xEventGroupSetBits(s_state_events,
@@ -613,6 +641,7 @@ void bm_gateway_mesh_init(void) {
         start_provisioning();
     }
 #endif
+    xTaskCreate(downlink_task, "gateway_dl", 4096, NULL, 5, NULL);
     ESP_LOGI(TAG, "gateway mesh initialized (provisioned=%d)", (int)mesh_is_provisioned());
 }
 
@@ -654,4 +683,65 @@ bool bm_gateway_mesh_send(uint16_t dst,
         return false;
     }
     return true;
+}
+
+static void downlink_task(void *argument) {
+    (void)argument;
+    bm_downlink_t item;
+    for (;;) {
+        if (s_downlink_queue == NULL ||
+            xQueueReceive(s_downlink_queue, &item, portMAX_DELAY) != pdTRUE) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
+        bool sent = false;
+        for (int attempt = 0; attempt < BM_DOWNLINK_MAX_ATTEMPTS; ++attempt) {
+            sent = bm_gateway_mesh_send(item.dst, item.opcode, item.ttl,
+                                        item.length > 0 ? item.payload : NULL,
+                                        item.length);
+            if (sent) {
+                break;
+            }
+            /* Not ready yet, or the advertising buffers are full: wait instead
+             * of discarding the command. */
+            vTaskDelay(pdMS_TO_TICKS(BM_DOWNLINK_RETRY_DELAY_MS));
+        }
+        if (!sent) {
+            ESP_LOGW(TAG, "downlink dropped after %d attempts: dst=0x%04x opcode=0x%06lx",
+                     BM_DOWNLINK_MAX_ATTEMPTS, item.dst,
+                     (unsigned long)item.opcode);
+        }
+        vTaskDelay(pdMS_TO_TICKS(BM_DOWNLINK_GAP_MS));
+    }
+}
+
+bool bm_gateway_mesh_enqueue(uint16_t dst,
+                             uint32_t opcode,
+                             uint8_t ttl,
+                             const uint8_t *payload,
+                             uint16_t length) {
+    if (s_downlink_queue == NULL) {
+        return bm_gateway_mesh_send(dst, opcode, ttl, payload, length);
+    }
+    bm_downlink_t item = {
+        .dst = dst,
+        .opcode = opcode,
+        .ttl = ttl,
+        .length = (uint8_t)(length > sizeof(item.payload) ? sizeof(item.payload)
+                                                          : length),
+    };
+    if (item.length > 0 && payload != NULL) {
+        memcpy(item.payload, payload, item.length);
+    } else {
+        item.length = 0;
+    }
+    /* Brief backpressure on the transport task rather than a silent drop. */
+    return xQueueSend(s_downlink_queue, &item, pdMS_TO_TICKS(500)) == pdTRUE;
+}
+
+uint16_t bm_gateway_mesh_pending_downlinks(void) {
+    if (s_downlink_queue == NULL) {
+        return 0;
+    }
+    return (uint16_t)uxQueueMessagesWaiting(s_downlink_queue);
 }

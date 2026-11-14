@@ -6,6 +6,11 @@
 
 #include "balloon_protocol.h"
 
+/* Corrections smaller than this are transport jitter, not drift. */
+#define BM_CLOCK_MIN_CORRECTION_MS 50
+/* 2100-01-01T00:00:00Z: anything beyond is a corrupt date, not a clock. */
+#define BM_CLOCK_MAX_UNIX_MS INT64_C(4102444800000)
+
 typedef struct {
     portMUX_TYPE lock;
     bool synced;
@@ -62,7 +67,7 @@ bool bm_clock_apply_anchor_time(int64_t utc_ms,
                                 uint64_t *old_tick,
                                 uint64_t *new_tick,
                                 bool *was_synced) {
-    if (utc_ms < BM_LED_TICK_ORIGIN_UNIX_MS) {
+    if (utc_ms < BM_LED_TICK_ORIGIN_UNIX_MS || utc_ms > BM_CLOCK_MAX_UNIX_MS) {
         return false;
     }
     uint64_t previous_tick = 0;
@@ -72,7 +77,21 @@ bool bm_clock_apply_anchor_time(int64_t utc_ms,
     previous_synced = s_clock.synced;
     if (previous_synced) {
         int64_t elapsed_us = mono_us - s_clock.base_mono_us;
-        previous_tick = bm_tick40_from_unix_ms(s_clock.base_utc_ms + elapsed_us / 1000);
+        int64_t estimate_ms = s_clock.base_utc_ms + elapsed_us / 1000;
+        int64_t delta_ms = utc_ms - estimate_ms;
+        if (delta_ms < 0) {
+            delta_ms = -delta_ms;
+        }
+        if (delta_ms < BM_CLOCK_MIN_CORRECTION_MS) {
+            /* Every anchor of every positioning cycle offers a time, each with
+             * its own transport jitter.  Re-basing on all of them would walk
+             * the clock back and forth, and a forward step past the LED queue's
+             * jump threshold silently discards reservations.  Keep the current
+             * base when the offer agrees with it. */
+            portEXIT_CRITICAL(&s_clock.lock);
+            return false;
+        }
+        previous_tick = bm_tick40_from_unix_ms(estimate_ms);
     }
     s_clock.synced = true;
     s_clock.base_utc_ms = utc_ms;

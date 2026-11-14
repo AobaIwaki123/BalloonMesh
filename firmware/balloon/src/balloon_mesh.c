@@ -613,7 +613,9 @@ void bm_balloon_mesh_init(void) {
 
     ESP_LOGI(TAG, "step 10: auto prov");
 #if defined(BM_DEV_AUTO_PROV) && BM_DEV_AUTO_PROV
-    int auto_err = bm_dev_auto_provision(0x0101, BM_GROUP_BALLOON);
+    const uint16_t dev_addr = bm_device_dev_unicast(0x0100u, 0x7F00u);
+    ESP_LOGW(TAG, "BM_DEV_AUTO_PROV: bench provisioning with addr=0x%04x", dev_addr);
+    int auto_err = bm_dev_auto_provision(dev_addr, BM_GROUP_BALLOON);
     if (auto_err == 0) {
         state_lock();
         xEventGroupSetBits(s_state_events,

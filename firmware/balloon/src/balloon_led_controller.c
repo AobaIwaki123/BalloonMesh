@@ -16,6 +16,13 @@
 
 static const char *TAG = "ledq";
 
+/* Debounce for the NVS snapshot.  Every executed reservation marks the queue
+ * dirty, so a short interval rewrote a ~4 KB blob continuously for the whole
+ * show, wearing the shared nvs partition and keeping its garbage collector
+ * busy.  Reservations lost in a power cut can be re-dispatched by the server,
+ * so the longer interval is the cheaper trade. */
+#define BM_LEDQ_SAVE_INTERVAL_MS 15000u
+
 typedef struct {
     SemaphoreHandle_t lock;
     bm_led_queue_t queue;
@@ -32,37 +39,66 @@ typedef struct {
 
 static bm_led_controller_t s_controller;
 static SemaphoreHandle_t s_save_lock;
-static bm_led_queue_t *s_pending_save;
 
-static bool handoff_snapshot(bm_led_queue_t *snapshot) {
-    if (snapshot == NULL) {
-        return true;
-    }
+/* Snapshot hand-off between the LED task and the NVS save task.  Two static
+ * slots instead of a per-save malloc: the queue is ~4.6 KB and allocating it
+ * every few seconds next to the BLE Mesh and Wi-Fi stacks invites heap
+ * fragmentation, and a failed allocation only showed up as a deferred save.
+ * The save task owns at most one slot at a time, so a free slot always
+ * remains for the producer. */
+static bm_led_queue_t s_save_slots[2];
+static bool s_save_slot_busy[2];
+static int8_t s_save_ready_slot = -1;
+
+/* Copies the queue into a free slot.  Returns false when the hand-off did not
+ * happen and the caller must stay dirty. */
+static bool handoff_snapshot(const bm_led_queue_t *queue) {
     if (s_save_lock == NULL ||
         xSemaphoreTake(s_save_lock, pdMS_TO_TICKS(50)) != pdTRUE) {
-        free(snapshot);
         return false;
     }
-    bm_led_queue_t *previous = s_pending_save;
-    s_pending_save = snapshot;
+    int8_t slot = -1;
+    /* Prefer overwriting a pending-but-unsaved snapshot: the newest wins. */
+    if (s_save_ready_slot >= 0 && !s_save_slot_busy[s_save_ready_slot]) {
+        slot = s_save_ready_slot;
+    } else {
+        for (int8_t i = 0; i < 2; ++i) {
+            if (!s_save_slot_busy[i]) {
+                slot = i;
+                break;
+            }
+        }
+    }
+    if (slot < 0) {
+        xSemaphoreGive(s_save_lock);
+        return false;
+    }
+    s_save_slots[slot] = *queue;
+    s_save_ready_slot = slot;
     xSemaphoreGive(s_save_lock);
-    free(previous);
     return true;
 }
 
 static void save_task(void *argument) {
     (void)argument;
     for (;;) {
-        bm_led_queue_t *snapshot = NULL;
+        int8_t slot = -1;
         if (s_save_lock != NULL &&
             xSemaphoreTake(s_save_lock, portMAX_DELAY) == pdTRUE) {
-            snapshot = s_pending_save;
-            s_pending_save = NULL;
+            slot = s_save_ready_slot;
+            if (slot >= 0) {
+                s_save_slot_busy[slot] = true;
+                s_save_ready_slot = -1;
+            }
             xSemaphoreGive(s_save_lock);
         }
-        if (snapshot != NULL) {
-            bool saved = bm_persistence_save_queue(snapshot);
-            free(snapshot);
+        if (slot >= 0) {
+            bool saved = bm_persistence_save_queue(&s_save_slots[slot]);
+            if (s_save_lock != NULL &&
+                xSemaphoreTake(s_save_lock, portMAX_DELAY) == pdTRUE) {
+                s_save_slot_busy[slot] = false;
+                xSemaphoreGive(s_save_lock);
+            }
             if (!saved &&
                 xSemaphoreTake(s_controller.lock, pdMS_TO_TICKS(50)) == pdTRUE) {
                 s_controller.dirty = true;
@@ -127,7 +163,7 @@ static void led_task(void *argument) {
     for (;;) {
         bool changed = false;
         bool has_output = false;
-        bm_led_queue_t *snapshot = NULL;
+        bool handoff_failed = false;
         bm_rgb_t output = {0, 0, 0};
 
         if (xSemaphoreTake(s_controller.lock, pdMS_TO_TICKS(50)) == pdTRUE) {
@@ -149,29 +185,33 @@ static void led_task(void *argument) {
                 }
             }
 
+            /* Drive the pins while still holding the lock.  Releasing first
+             * let an immediate command (LED_SET_NOW) and a scheduled entry
+             * reach the LEDC registers out of order, leaving the lamp on a
+             * colour the queue no longer believes in. */
+            if (has_output) {
+                bm_led_output_set(output.r, output.g, output.b);
+            }
+
             uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
             retry_pending_status_locked(now_ms);
             if (s_controller.dirty &&
-                (uint32_t)(now_ms - s_controller.last_save_ms) >= 2000u) {
-                snapshot = (bm_led_queue_t *)malloc(sizeof(*snapshot));
-                if (snapshot != NULL) {
-                    *snapshot = s_controller.queue;
+                (uint32_t)(now_ms - s_controller.last_save_ms) >= BM_LEDQ_SAVE_INTERVAL_MS) {
+                if (handoff_snapshot(&s_controller.queue)) {
                     s_controller.dirty = false;
                     s_controller.last_save_ms = now_ms;
+                } else {
+                    handoff_failed = true;
                 }
             }
             xSemaphoreGive(s_controller.lock);
         }
 
         if (has_output) {
-            bm_led_output_set(output.r, output.g, output.b);
             ESP_LOGI(TAG, "executed RGB %u,%u,%u", output.r, output.g, output.b);
         }
-
-        if (!handoff_snapshot(snapshot) &&
-            xSemaphoreTake(s_controller.lock, pdMS_TO_TICKS(50)) == pdTRUE) {
-            s_controller.dirty = true;
-            xSemaphoreGive(s_controller.lock);
+        if (handoff_failed) {
+            ESP_LOGW(TAG, "snapshot hand-off deferred");
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -266,12 +306,14 @@ void bm_led_controller_handle_opcode(uint32_t opcode,
         mark_dirty_locked();
         refresh_monitor_locked();
     }
-    uint16_t count = s_controller.queue.count;
-    xSemaphoreGive(s_controller.lock);
-
+    /* Still under the lock, so an immediate command and a scheduled entry
+     * cannot reach the LEDC registers out of order. */
     if (emit_output) {
         bm_led_output_set(output.r, output.g, output.b);
     }
+    uint16_t count = s_controller.queue.count;
+    xSemaphoreGive(s_controller.lock);
+
     if (result != BM_LEDQ_INVALID) {
         ESP_LOGI(TAG, "opcode=0x%06lx result=%d queue=%u", (unsigned long)opcode,
                  (int)result, count);

@@ -85,7 +85,10 @@ static bool send_hello(void) {
              "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
              "\"token\":\"%s\",\"provisioned\":%s,\"spoolPending\":%u}",
              BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
-             "true",
+             /* Reporting a hard-coded "true" made the server route downlinks
+              * to a gateway whose vendor models were not bound yet, and those
+              * commands were discarded. */
+             bm_gateway_mesh_is_ready() ? "true" : "false",
              (unsigned)bm_gateway_spool_count());
     return esp_websocket_client_send_text(s_client, hello, (int)strlen(hello),
                                           pdMS_TO_TICKS(3000)) >= 0;
@@ -117,19 +120,21 @@ static void handle_downlink(const char *text, int length) {
                 data_len = hex_decode(payload->valuestring, data, sizeof(data));
             }
             uint8_t ttl_value = cJSON_IsNumber(ttl) ? (uint8_t)ttl->valueint : 7;
-            ESP_LOGI(TAG, "downlink dst=0x%04x opcode=0x%06lx len=%u",
-                     (unsigned)dst->valueint, (unsigned long)opcode->valuedouble,
-                     (unsigned)data_len);
-            Serial.printf("[COMMAND RECEIVED] dst=0x%04x opcode=0x%06lx payload=%s len=%u\n",
-                          (unsigned)dst->valueint, (unsigned long)opcode->valuedouble,
-                          (cJSON_IsString(payload) && payload->valuestring) ? payload->valuestring : "",
-                          (unsigned)data_len);
-            Serial.flush();
-            bool ok = bm_gateway_mesh_send((uint16_t)dst->valueint,
-                                           (uint32_t)opcode->valuedouble,
-                                           ttl_value, data, (uint16_t)data_len);
-            Serial.printf("[MESH SEND] result=%d\n", (int)ok);
-            Serial.flush();
+            /* This runs on the websocket client's own task.  Queue the
+             * command for the paced mesh sender instead of transmitting (and
+             * blocking on Serial) inline, so a fleet-wide dispatch burst is
+             * not limited by this callback. */
+            if (!bm_gateway_mesh_enqueue((uint16_t)dst->valueint,
+                                         (uint32_t)opcode->valuedouble,
+                                         ttl_value, data, (uint16_t)data_len)) {
+                ESP_LOGW(TAG, "downlink queue full; dropped dst=0x%04x opcode=0x%06lx",
+                         (unsigned)dst->valueint,
+                         (unsigned long)opcode->valuedouble);
+            } else {
+                ESP_LOGI(TAG, "downlink queued dst=0x%04x opcode=0x%06lx len=%u",
+                         (unsigned)dst->valueint,
+                         (unsigned long)opcode->valuedouble, (unsigned)data_len);
+            }
         }
     }
     cJSON_Delete(root);
@@ -211,6 +216,9 @@ static void ws_sender_task(void *argument) {
                                                       pdMS_TO_TICKS(3000));
             if (sent < 0) {
                 ESP_LOGW(TAG, "send failed; retaining event");
+                /* Without this the task spins on the same event at priority 4
+                 * and starves the spool/Wi-Fi tasks. */
+                vTaskDelay(pdMS_TO_TICKS(500));
             } else {
                 bm_gateway_spool_drop_through(sequence);
             }

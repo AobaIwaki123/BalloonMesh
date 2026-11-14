@@ -46,7 +46,8 @@ static void responder_task(void *argument) {
                 if (s_state.probes_sent >= BM_NEIGHBOR_PROBE_TX_COUNT) {
                     s_state.probing = false;
                 } else {
-                    s_state.next_probe_ms = now + 4000u + (esp_random() % 5000u);
+                    s_state.next_probe_ms = now + BM_PROBE_GAP_MIN_MS +
+                                            (esp_random() % BM_PROBE_GAP_JITTER_MS);
                 }
             }
             xSemaphoreGive(s_state.lock);
@@ -129,7 +130,11 @@ void bm_neighbor_link_on_request(void) {
     if (!s_state.probing) {
         s_state.probing = true;
         s_state.probes_sent = 0;
-        s_state.next_probe_ms = now_ms();
+        /* The REQUEST is a group broadcast, so every balloon in range starts
+         * here in the same millisecond.  Spreading the first PROBE over the
+         * window keeps them from colliding; the remaining window still fits
+         * BM_NEIGHBOR_PROBE_TX_COUNT transmissions. */
+        s_state.next_probe_ms = now_ms() + (esp_random() % BM_PROBE_FIRST_JITTER_MS);
     }
     xSemaphoreGive(s_state.lock);
 }

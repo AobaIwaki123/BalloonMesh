@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -24,6 +25,12 @@ static const uint8_t s_token[8] = BM_ANCHOR_TOKEN_BYTES;
 static HardwareSerial s_gps(BM_GPS_UART_PORT);
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static bm_nmea_state_t s_state;
+/* Monotonic timestamp of the sentence that last advanced s_state.utc_ms.
+ * The GPS emits one fix per second, so serving utc_ms unchanged would hand the
+ * balloon a value up to a second old; the age is added back on response and a
+ * stale fix drops the TIME_VALID / POSITION_VALID flags. */
+static int64_t s_time_mono_us;
+static int64_t s_fix_mono_us;
 
 static void gps_task(void *argument) {
     (void)argument;
@@ -44,9 +51,25 @@ static void gps_task(void *argument) {
                     parsed = s_state;
                     portEXIT_CRITICAL(&s_state_lock);
 
+                    const int64_t previous_utc_ms = parsed.utc_ms;
+                    const bool previous_time_valid = parsed.time_valid;
                     if (bm_nmea_feed_line(&parsed, line)) {
+                        /* Stamp as close to reception as possible.  The
+                         * residual bias is the sentence transmission time
+                         * (~70 ms for one sentence at 9600 baud), not the
+                         * whole 1 Hz fix interval. */
+                        const int64_t received_us = esp_timer_get_time();
+                        const bool time_advanced =
+                            parsed.time_valid &&
+                            (!previous_time_valid || parsed.utc_ms != previous_utc_ms);
                         portENTER_CRITICAL(&s_state_lock);
                         s_state = parsed;
+                        if (time_advanced) {
+                            s_time_mono_us = received_us;
+                        }
+                        if (parsed.position_valid) {
+                            s_fix_mono_us = received_us;
+                        }
                         portEXIT_CRITICAL(&s_state_lock);
                         valid_nmea++;
                     }
@@ -102,8 +125,9 @@ static void udp_task(void *argument) {
     // The Arduino AP helper supports FTM responder directly.  It also
     // performs the AP-side initialization (including the WPA2 cipher and
     // DHCP/netif setup) that a hand-built wifi_config_t would otherwise omit.
-    if (!WiFi.softAP(ssid, BM_ANCHOR_WIFI_PASSWORD, BM_ANCHOR_WIFI_CHANNEL,
-                     0, 4, true)) {
+    const uint8_t channel = BM_ANCHOR_CHANNEL_FOR_ID((unsigned)BM_ANCHOR_ID);
+    if (!WiFi.softAP(ssid, BM_ANCHOR_WIFI_PASSWORD, channel,
+                     0, BM_ANCHOR_MAX_CLIENTS, true)) {
         ESP_LOGE(TAG, "SoftAP start failed");
     }
     // FTM measurements are invalid ("No valid FTM Measurements") on a 40 MHz
@@ -118,7 +142,7 @@ static void udp_task(void *argument) {
     }
     ESP_LOGI(TAG, "UDP anchor data server on port %u", BM_ANCHOR_UDP_PORT);
     ESP_LOGI(TAG, "SoftAP '%s' started, IP=%s, channel=%u, FTM responder",
-             ssid, WiFi.softAPIP().toString().c_str(), BM_ANCHOR_WIFI_CHANNEL);
+             ssid, WiFi.softAPIP().toString().c_str(), (unsigned)channel);
 
     uint8_t request[BM_ANCHOR_REQUEST_SIZE];
     uint8_t response[BM_ANCHOR_RESPONSE_SIZE];
@@ -129,20 +153,43 @@ static void udp_task(void *argument) {
             if (read == (int)sizeof(request) &&
                 bm_anchor_request_validate(request, sizeof(request), s_token)) {
                 bm_nmea_state_t state;
+                int64_t time_mono_us;
+                int64_t fix_mono_us;
                 portENTER_CRITICAL(&s_state_lock);
                 state = s_state;
+                time_mono_us = s_time_mono_us;
+                fix_mono_us = s_fix_mono_us;
                 portEXIT_CRITICAL(&s_state_lock);
 
+                const int64_t now_us = esp_timer_get_time();
+                const int64_t time_age_us = now_us - time_mono_us;
+                const int64_t fix_age_us = now_us - fix_mono_us;
+                /* A GPS that lost its fix keeps the last utc_ms forever, so
+                 * age it out instead of serving a frozen clock: the balloon
+                 * would otherwise resync backwards every positioning cycle
+                 * and stall its LED queue. */
+                const bool time_usable =
+                    state.time_valid && time_mono_us > 0 &&
+                    time_age_us < (int64_t)BM_ANCHOR_TIME_MAX_AGE_MS * 1000;
+                const bool position_usable =
+                    state.position_valid && fix_mono_us > 0 &&
+                    fix_age_us < (int64_t)BM_ANCHOR_FIX_MAX_AGE_MS * 1000;
+
                 uint8_t flags = BM_ANCHOR_FLAG_AUTHENTICATED;
-                if (state.time_valid) {
+                if (time_usable) {
                     flags |= BM_ANCHOR_FLAG_TIME_VALID;
                 }
-                if (state.position_valid) {
+                if (position_usable) {
                     flags |= BM_ANCHOR_FLAG_POSITION_VALID;
                 }
+                /* Advance the reported time by the age of the sentence it came
+                 * from so the balloon anchors its clock on "now", not on the
+                 * last 1 Hz fix. */
+                const int64_t utc_ms =
+                    time_usable ? state.utc_ms + time_age_us / 1000 : 0;
                 size_t length = bm_anchor_response_encode(
                     response, sizeof(response), BM_ANCHOR_ID, flags,
-                    state.time_valid ? state.utc_ms : 0,
+                    utc_ms,
                     state.lat_e7, state.lon_e7, state.alt_cm,
                     state.h_acc_cm, s_token);
                 if (length > 0) {

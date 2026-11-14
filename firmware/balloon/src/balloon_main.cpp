@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include "esp_log.h"
+#include "esp_random.h"
 #include "nvs_flash.h"
 
 #include "balloon_clock.h"
@@ -59,12 +60,33 @@ void setup() {
 
 void loop() {
     static uint32_t last = 0;
+    static bool request_armed = false;
+    static uint32_t request_at = 0;
+    static uint32_t request_interval = 30000u;
     uint32_t now = millis();
+    if (!request_armed) {
+        request_armed = true;
+        /* Per-device offset: the fleet powers up together. */
+        request_at = now + 15000u + (uint32_t)(esp_random() % 15000u);
+    }
+    /* Ask the mesh for the time on its own schedule.  Every balloon is
+     * unsynced right after a power-up, so a fixed 30 s interval put the whole
+     * fleet's requests (and the replies to them) on the same broadcast group
+     * at the same moments; back off while it stays unsynced. */
+    if (!bm_clock_is_synced()) {
+        if ((int32_t)(now - request_at) >= 0) {
+            bm_time_link_request();
+            if (request_interval < 240000u) {
+                request_interval *= 2u;
+            }
+            request_at = now + request_interval + (uint32_t)(esp_random() % 10000u);
+        }
+    } else {
+        request_interval = 30000u;
+        request_at = now + request_interval;
+    }
     if ((uint32_t)(now - last) >= 30000u) {
         last = now;
-        if (!bm_clock_is_synced()) {
-            bm_time_link_request();
-        }
         bm_led_controller_state_t state = {};
         bm_led_controller_get_state(&state);
         ESP_LOGI(TAG, "addr=0x%04x provisioned=%d synced=%d queue=%u rgb=%u,%u,%u",
