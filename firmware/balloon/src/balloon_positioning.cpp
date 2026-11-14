@@ -27,6 +27,9 @@
 static const char *TAG = "positioning";
 
 static const uint8_t s_anchor_token[8] = BM_ANCHOR_TOKEN_BYTES;
+static const IPAddress s_anchor_station_ip(192, 168, 4, 2);
+static const IPAddress s_anchor_gateway_ip(192, 168, 4, 1);
+static const IPAddress s_anchor_subnet(255, 255, 255, 0);
 static SemaphoreHandle_t s_ftm_done;
 static volatile bool s_ftm_ok;
 static volatile uint32_t s_ftm_distance_cm;
@@ -105,6 +108,12 @@ static void sync_clock_if_possible(const bm_anchor_response_t *response) {
 static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
                            uint8_t *valid_count) {
     ESP_LOGI(TAG, "connecting to %s", anchor->ssid);
+    // The anchor network is an isolated point-to-point SoftAP.  Use a fixed
+    // station address so the UDP exchange does not depend on DHCP completing
+    // before the short Wi-Fi connection window expires.
+    if (!WiFi.config(s_anchor_station_ip, s_anchor_gateway_ip, s_anchor_subnet)) {
+        ESP_LOGW(TAG, "anchor station IP configuration failed");
+    }
     WiFi.begin(anchor->ssid, BM_ANCHOR_WIFI_PASSWORD);
     uint32_t start = millis();
     while (WiFi.status() != WL_CONNECTED && (uint32_t)(millis() - start) < BM_ANCHOR_CONNECT_TIMEOUT_MS) {
