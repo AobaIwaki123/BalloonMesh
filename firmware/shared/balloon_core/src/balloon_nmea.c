@@ -124,6 +124,9 @@ static bool handle_rmc(bm_nmea_state_t *state, char *fields[], int count) {
     if (sscanf(fields[9], "%2d%2d%2d", &day, &month, &year) != 3) {
         return false;
     }
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+        return false;
+    }
     if (year < 70) {
         year += 2000;
     } else {
