@@ -613,21 +613,39 @@ void bm_balloon_mesh_init(void) {
 
     ESP_LOGI(TAG, "step 10: auto prov");
 #if defined(BM_DEV_AUTO_PROV) && BM_DEV_AUTO_PROV
-    const uint16_t dev_addr = bm_device_dev_unicast(0x0100u, 0x7F00u);
-    ESP_LOGW(TAG, "BM_DEV_AUTO_PROV: bench provisioning with addr=0x%04x", dev_addr);
-    int auto_err = bm_dev_auto_provision(dev_addr, BM_GROUP_BALLOON);
-    if (auto_err == 0) {
+    uint16_t auto_addr = BM_DEV_UNICAST_ADDR != 0
+                             ? BM_DEV_UNICAST_ADDR
+                             : bm_device_dev_unicast(
+                                   BM_DEV_BALLOON_ADDR_MIN,
+                                   (uint16_t)(BM_DEV_BALLOON_ADDR_MAX -
+                                              BM_DEV_BALLOON_ADDR_MIN + 1u));
+    if (esp_ble_mesh_node_is_provisioned()) {
         state_lock();
-        xEventGroupSetBits(s_state_events,
-                           BM_MESH_STATE_PROVISIONED |
-                           BM_MESH_STATE_CONTROL_BOUND |
-                           BM_MESH_STATE_TELEMETRY_BOUND);
+        xEventGroupSetBits(s_state_events, BM_MESH_STATE_PROVISIONED);
         state_unlock();
         s_primary_addr = esp_ble_mesh_get_primary_element_address();
-        ESP_LOGI(TAG, "dev auto-provisioned successfully: addr=0x%04x", s_primary_addr);
-    } else {
-        ESP_LOGE(TAG, "dev auto-provision failed: %d", auto_err);
+        configure_vendor_models();
+        ESP_LOGI(TAG, "development node restored from NVS: addr=0x%04x", s_primary_addr);
+    } else if (auto_addr == 0 || auto_addr < BM_DEV_BALLOON_ADDR_MIN ||
+               auto_addr > BM_DEV_BALLOON_ADDR_MAX) {
+        ESP_LOGE(TAG, "no valid development Mesh address");
         start_provisioning();
+    } else {
+        ESP_LOGI(TAG, "development auto-provision address=0x%04x", auto_addr);
+        int auto_err = bm_dev_auto_provision(auto_addr, BM_GROUP_BALLOON);
+        if (auto_err == 0) {
+            state_lock();
+            xEventGroupSetBits(s_state_events,
+                               BM_MESH_STATE_PROVISIONED |
+                               BM_MESH_STATE_CONTROL_BOUND |
+                               BM_MESH_STATE_TELEMETRY_BOUND);
+            state_unlock();
+            s_primary_addr = esp_ble_mesh_get_primary_element_address();
+            ESP_LOGI(TAG, "dev auto-provisioned successfully: addr=0x%04x", s_primary_addr);
+        } else {
+            ESP_LOGE(TAG, "dev auto-provision failed: %d", auto_err);
+            start_provisioning();
+        }
     }
 #else
     if (esp_ble_mesh_node_is_provisioned()) {
