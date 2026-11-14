@@ -29,9 +29,13 @@ static void gps_task(void *argument) {
     (void)argument;
     char line[160];
     size_t length = 0;
+    uint32_t report_at = millis() + 5000u;
+    uint32_t rx_bytes = 0;
+    uint32_t valid_nmea = 0;
     for (;;) {
         while (s_gps.available() > 0) {
             char c = (char)s_gps.read();
+            rx_bytes++;
             if (c == '\n') {
                 line[length] = '\0';
                 if (length > 0) {
@@ -44,6 +48,7 @@ static void gps_task(void *argument) {
                         portENTER_CRITICAL(&s_state_lock);
                         s_state = parsed;
                         portEXIT_CRITICAL(&s_state_lock);
+                        valid_nmea++;
                     }
                 }
                 length = 0;
@@ -52,6 +57,24 @@ static void gps_task(void *argument) {
             } else {
                 length = 0;
             }
+        }
+        uint32_t now = millis();
+        if ((int32_t)(now - report_at) >= 0) {
+            bm_nmea_state_t state;
+            portENTER_CRITICAL(&s_state_lock);
+            state = s_state;
+            portEXIT_CRITICAL(&s_state_lock);
+            ESP_LOGI(TAG,
+                     "GPS rx_bytes=%lu valid_nmea=%lu time_valid=%d position_valid=%d "
+                     "utc_ms=%llu lat_e7=%ld lon_e7=%ld alt_cm=%ld h_acc_cm=%u",
+                     (unsigned long)rx_bytes, (unsigned long)valid_nmea,
+                     (int)state.time_valid, (int)state.position_valid,
+                     (unsigned long long)state.utc_ms, (long)state.lat_e7,
+                     (long)state.lon_e7, (long)state.alt_cm,
+                     (unsigned)state.h_acc_cm);
+            rx_bytes = 0;
+            valid_nmea = 0;
+            report_at = now + 5000u;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -68,6 +91,14 @@ static void udp_task(void *argument) {
     // Wi-Fi must be initialised before WiFiUDP::begin() creates and binds the
     // lwIP socket; otherwise the bind fails and the anchor silently dies.
     WiFi.mode(WIFI_AP);
+    // Configure the AP netif explicitly so the built-in DHCP server is
+    // started reliably on every boot.  The balloon uses this address for the
+    // UDP anchor-data request.
+    const IPAddress ap_ip(192, 168, 4, 1);
+    const IPAddress ap_subnet(255, 255, 255, 0);
+    if (!WiFi.softAPConfig(ap_ip, ap_ip, ap_subnet)) {
+        ESP_LOGE(TAG, "SoftAP IP/DHCP configuration failed");
+    }
     WiFi.softAP(ssid, BM_ANCHOR_WIFI_PASSWORD, BM_ANCHOR_WIFI_CHANNEL, 0, 4);
     wifi_config_t config = {};
     if (esp_wifi_get_config(WIFI_IF_AP, &config) == ESP_OK) {
