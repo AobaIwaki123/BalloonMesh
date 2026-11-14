@@ -99,8 +99,12 @@
   const filteredBalloons = $derived(
     balloons.filter((balloon) => {
       const query = search.trim().toLowerCase();
-      return !query || balloon.name.toLowerCase().includes(query) ||
-        balloon.meshAddress.toString().includes(query);
+      if (!query) return true;
+
+      const decimalAddress = balloon.meshAddress.toString();
+      const hexAddress = balloon.meshAddress.toString(16);
+      return [balloon.name, decimalAddress, hexAddress, `0x${hexAddress}`]
+        .some((value) => value.toLowerCase().includes(query));
     })
   );
   const onlineCount = $derived(balloons.filter((balloon) => balloon.online).length);
