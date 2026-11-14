@@ -61,7 +61,7 @@ pio test -e native
 
 ## RGB LED（balloon）
 
-balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 8bit** で初期化します。
+balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 10bit** で初期化します。コマンド値は 0-255 のまま、ガンマ LUT が 10bit duty へ展開します（0 以外は必ず duty 1 以上）。
 
 - balloon: LED キュー / 現在色
 - anchor / gateway: RGB LED なし（LED 制御は行いません）

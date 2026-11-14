@@ -10,12 +10,22 @@
 #include "nvs.h"
 
 static const char *TAG = "gateway-spool";
-#define BM_SPOOL_CAPACITY 128u
+/* The whole fleet's telemetry funnels through one gateway, so 128 slots were
+ * only a few seconds of buffer during a positioning cycle. */
+#define BM_SPOOL_CAPACITY 256u
 #define BM_SPOOL_HEADER 10u
 #define BM_SPOOL_EVENT_BYTES 24u
 #define BM_SPOOL_BLOB_MAX (BM_SPOOL_HEADER + BM_SPOOL_CAPACITY * BM_SPOOL_EVENT_BYTES)
+/* Events arrive continuously, so a short debounce rewrote the blob to the
+ * shared nvs partition without pause. */
+#define BM_SPOOL_SAVE_INTERVAL_MS 15000u
 #define BM_NVS_NAMESPACE "bm_gw"
 #define BM_NVS_KEY "spool"
+
+/* Encoding happens under the spool lock and the only writer is the save task,
+ * so one static buffer is enough; a per-save malloc of several KB next to the
+ * BLE Mesh and Wi-Fi stacks is what we want to avoid. */
+static uint8_t s_blob[BM_SPOOL_BLOB_MAX];
 
 typedef struct {
     SemaphoreHandle_t lock;
@@ -88,11 +98,7 @@ static void load_from_nvs(void) {
         nvs_close(handle);
         return;
     }
-    uint8_t *buffer = (uint8_t *)malloc(length);
-    if (buffer == NULL) {
-        nvs_close(handle);
-        return;
-    }
+    uint8_t *buffer = s_blob;
     if (nvs_get_blob(handle, BM_NVS_KEY, buffer, &length) == ESP_OK &&
         buffer[0] == 'G' && buffer[1] == 'S' && buffer[2] == 'P' && buffer[3] == '1') {
         uint16_t count = read_u16(&buffer[6]);
@@ -113,27 +119,20 @@ static void load_from_nvs(void) {
             ESP_LOGI(TAG, "restored %u pending events", count);
         }
     }
-    free(buffer);
     nvs_close(handle);
 }
 
 static bool save_to_nvs(void) {
-    uint8_t *buffer;
+    uint8_t *buffer = s_blob;
     size_t length;
     uint16_t count;
-    /* Encode into the heap blob while holding the lock: a full snapshot
-     * (128 * 24 B) would not fit on the save task's stack. */
+    /* Encode into the static blob while holding the lock: a full snapshot
+     * would not fit on the save task's stack. */
     if (xSemaphoreTake(s_spool.lock, pdMS_TO_TICKS(200)) != pdTRUE) {
         return false;
     }
     count = s_spool.count;
     length = BM_SPOOL_HEADER + (size_t)count * BM_SPOOL_EVENT_BYTES;
-    buffer = (uint8_t *)malloc(length);
-    if (buffer == NULL) {
-        s_spool.dirty = true;
-        xSemaphoreGive(s_spool.lock);
-        return false;
-    }
     memset(buffer, 0, length);
     buffer[0] = 'G';
     buffer[1] = 'S';
@@ -158,7 +157,6 @@ static bool save_to_nvs(void) {
         }
         nvs_close(handle);
     }
-    free(buffer);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "save failed: %s", esp_err_to_name(err));
         s_spool.dirty = true;
@@ -170,7 +168,7 @@ static bool save_to_nvs(void) {
 static void save_task(void *argument) {
     (void)argument;
     for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(BM_SPOOL_SAVE_INTERVAL_MS));
         bool dirty;
         if (xSemaphoreTake(s_spool.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
             dirty = s_spool.dirty;

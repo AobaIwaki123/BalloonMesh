@@ -1,6 +1,12 @@
 # Name,   Type, SubType, Offset,   Size, Flags
-nvs,      data, nvs,     0x9000,   0x5000,
-otadata,  data, ota,     0xe000,   0x2000,
-app0,     app,  ota_0,   0x10000,  0x300000,
-spiffs,   data, spiffs,  0x310000, 0xE0000,
+# nvs holds the BLE Mesh settings (unicast address, keys, model bind, group
+# subscription, SEQ/RPL), the Wi-Fi configuration and this firmware's own
+# snapshots (LED queue / gateway spool, ~4 KB rewritten periodically).  The
+# stock 20 KB left so little slack that garbage collection ran constantly and
+# a full partition would have taken the mesh settings down with it.
+nvs,      data, nvs,     0x9000,   0xD000,
+otadata,  data, ota,     0x16000,  0x2000,
+app0,     app,  ota_0,   0x20000,  0x2C0000,
+# Unused by the firmware; reserved for a future ota_1 slot.
+spiffs,   data, spiffs,  0x2E0000, 0x110000,
 coredump, data, coredump,0x3F0000, 0x10000,

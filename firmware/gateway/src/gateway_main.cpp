@@ -235,9 +235,13 @@ static void poll_commands_task(void *argument) {
                         ESP_LOGI(TAG, "downlink dst=0x%04x opcode=0x%06lx len=%u",
                                  (unsigned)dst->valueint,
                                  (unsigned long)opcode->valuedouble, (unsigned)length);
-                        bm_gateway_mesh_send((uint16_t)dst->valueint,
-                                             (uint32_t)opcode->valuedouble,
-                                             ttl_value, data, (uint16_t)length);
+                        if (!bm_gateway_mesh_enqueue((uint16_t)dst->valueint,
+                                                     (uint32_t)opcode->valuedouble,
+                                                     ttl_value, data,
+                                                     (uint16_t)length)) {
+                            ESP_LOGW(TAG, "downlink queue full; dropped dst=0x%04x",
+                                     (unsigned)dst->valueint);
+                        }
                     }
                 }
                 cJSON_Delete(root);

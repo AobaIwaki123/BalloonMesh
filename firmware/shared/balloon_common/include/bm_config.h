@@ -43,6 +43,19 @@
 #define BM_ANCHOR_TOKEN_BYTES { 'B', 'A', 'L', 'L', 'O', 'O', 'N', '1' }
 #define BM_ANCHOR_MAX 8u
 #define BM_ANCHOR_WIFI_CHANNEL 6u
+/* Anchors on one channel share the air with every balloon associating to them,
+ * so spread them over the three non-overlapping 2.4 GHz channels. */
+#define BM_ANCHOR_CHANNEL_FOR_ID(id) \
+    ((uint8_t)(((id) % 3u) == 1u ? 1u : (((id) % 3u) == 2u ? 6u : 11u)))
+/* SoftAP association slots.  The default of 4 makes the fifth balloon of a
+ * cycle wait out the full connect timeout, so FTM coverage collapses as the
+ * fleet grows. */
+#define BM_ANCHOR_MAX_CLIENTS 8u
+/* The anchor stops advertising TIME_VALID / POSITION_VALID once the last fix
+ * is older than this; a GPS that loses its fix otherwise serves a frozen
+ * clock that drags every balloon's LED schedule backwards. */
+#define BM_ANCHOR_TIME_MAX_AGE_MS 3000u
+#define BM_ANCHOR_FIX_MAX_AGE_MS 10000u
 // Association can take several seconds when the balloon is far from an
 // anchor; keep enough time for the first scan before declaring it unreachable.
 #define BM_ANCHOR_CONNECT_TIMEOUT_MS 12000u
@@ -64,7 +77,10 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
 #define BM_LED_G_GPIO 3
 #define BM_LED_B_GPIO 4
 #define BM_LED_PWM_FREQ_HZ 5000
-#define BM_LED_PWM_RESOLUTION 8
+/* 10 bit at 5 kHz is well within the LEDC limit (80 MHz / 5 kHz = 2^13.9) and
+ * gives the gamma curve enough room at the bottom: with 8 bit duty the dimmest
+ * commanded colours rounded down to "off". */
+#define BM_LED_PWM_RESOLUTION 10
 
 /* Perceptual gamma applied to the physical LED output only.  Linear duty
  * makes low colour values look far brighter than intended (the eye is
@@ -138,3 +154,15 @@ _Static_assert(sizeof(BM_GATEWAY_WIFI_PASSWORD) > 1,
 /* Neighbour probe timing. */
 #define BM_NEIGHBOR_PROBE_WINDOW_MS 20000u
 #define BM_PROBE_RESPONSE_SPAN_MS 19000u
+/* Spread of the first PROBE after the group-wide REQUEST, and the gap between
+ * the following ones.  first jitter + 2 * max gap stays inside
+ * BM_PROBE_RESPONSE_SPAN_MS for BM_NEIGHBOR_PROBE_TX_COUNT = 3. */
+#define BM_PROBE_FIRST_JITTER_MS 2500u
+#define BM_PROBE_GAP_MIN_MS 4000u
+#define BM_PROBE_GAP_JITTER_MS 4000u
+
+/* Mesh time fallback.  A TIME_REQUEST is a group broadcast, so without jitter
+ * and suppression every synced balloon answers it in the same millisecond. */
+#define BM_TIME_REPLY_JITTER_MS 2000u
+#define BM_TIME_REPLY_SUPPRESS_MS 5000u
+#define BM_TIME_REPLY_MIN_INTERVAL_MS 10000u

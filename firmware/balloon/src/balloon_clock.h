@@ -13,9 +13,11 @@ int64_t bm_clock_now_mono_us(void);
 int64_t bm_clock_now_ms(void);
 uint64_t bm_clock_now_tick40(void);
 
-/* Applies an absolute anchor time. Returns false when the value is invalid.
- * The old/new ticks are used by the LED queue to discard reservations crossed
- * by a forward correction without executing them. */
+/* Applies an absolute anchor time.  Returns false when the value is invalid or
+ * when the clock already agrees with it (no correction applied, so the caller
+ * must not notify the LED queue).  The old/new ticks are used by the LED queue
+ * to discard reservations crossed by a forward correction without executing
+ * them. */
 bool bm_clock_apply_anchor_time(int64_t utc_ms,
                                 int64_t mono_us,
                                 uint64_t *old_tick,
