@@ -83,25 +83,56 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
 #define BM_GPS_RX_GPIO 7
 #define BM_GPS_BAUD 9600
 
-/* Gateway configuration (override with -D in platformio.ini). */
+/* Gateway deployment configuration.  The gateway PlatformIO project injects
+ * these values from the build environment; do not store deployment endpoints
+ * or credentials in this shared header. */
 #ifndef BM_GATEWAY_TOKEN
 #define BM_GATEWAY_TOKEN ""
 #endif
 #ifndef BM_GATEWAY_ID
-#define BM_GATEWAY_ID "gw-01"
+#define BM_GATEWAY_ID ""
 #endif
 #ifndef BM_SERVER_URL
-#define BM_SERVER_URL "http://192.168.1.10:5080"
+#define BM_SERVER_URL ""
 #endif
 /* Optional PEM CA bundle for HTTPS gateways. Define through build_flags. */
 #ifndef BM_TLS_CA_CERT
 /* #define BM_TLS_CA_CERT "-----BEGIN CERTIFICATE-----\n..." */
 #endif
 #ifndef BM_GATEWAY_WIFI_SSID
-#define BM_GATEWAY_WIFI_SSID "balloon-mesh"
+#define BM_GATEWAY_WIFI_SSID ""
 #endif
 #ifndef BM_GATEWAY_WIFI_PASSWORD
-#define BM_GATEWAY_WIFI_PASSWORD "balloonmesh"
+#define BM_GATEWAY_WIFI_PASSWORD ""
+#endif
+
+#if defined(BM_ROLE_GATEWAY)
+/* A gateway image must be built with deployment-specific identity, endpoint,
+ * authentication token, and Wi-Fi credentials.  Keep the diagnostics generic
+ * so a missing value cannot echo a secret into build logs. */
+#if defined(__cplusplus)
+static_assert(sizeof(BM_GATEWAY_ID) > 1,
+              "BM_GATEWAY_ID must be supplied for gateway deployment");
+static_assert(sizeof(BM_SERVER_URL) > 1,
+              "BM_SERVER_URL must be supplied for gateway deployment");
+static_assert(sizeof(BM_GATEWAY_TOKEN) > 1,
+              "BM_GATEWAY_TOKEN must be supplied for gateway deployment");
+static_assert(sizeof(BM_GATEWAY_WIFI_SSID) > 1,
+              "BM_GATEWAY_WIFI_SSID must be supplied for gateway deployment");
+static_assert(sizeof(BM_GATEWAY_WIFI_PASSWORD) > 1,
+              "BM_GATEWAY_WIFI_PASSWORD must be supplied for gateway deployment");
+#else
+_Static_assert(sizeof(BM_GATEWAY_ID) > 1,
+               "BM_GATEWAY_ID must be supplied for gateway deployment");
+_Static_assert(sizeof(BM_SERVER_URL) > 1,
+               "BM_SERVER_URL must be supplied for gateway deployment");
+_Static_assert(sizeof(BM_GATEWAY_TOKEN) > 1,
+               "BM_GATEWAY_TOKEN must be supplied for gateway deployment");
+_Static_assert(sizeof(BM_GATEWAY_WIFI_SSID) > 1,
+               "BM_GATEWAY_WIFI_SSID must be supplied for gateway deployment");
+_Static_assert(sizeof(BM_GATEWAY_WIFI_PASSWORD) > 1,
+               "BM_GATEWAY_WIFI_PASSWORD must be supplied for gateway deployment");
+#endif
 #endif
 
 /* Neighbour probe timing. */
