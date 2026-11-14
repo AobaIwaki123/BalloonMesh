@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -18,6 +19,16 @@ void bm_device_uuid(uint8_t uuid[16]);
  * use only; production images are provisioned.
  * Ranges in use: gateways 0x0002..0x00FF, balloons 0x0100..0x7FFF. */
 uint16_t bm_device_dev_unicast(uint16_t base, uint16_t span);
+
+/* Derives a stable development unicast address from the Bluetooth MAC.
+ * The caller supplies a role-specific valid unicast range. */
+uint16_t bm_device_unicast_addr(uint16_t min_addr, uint16_t max_addr);
+
+/* Returns the configured gateway ID or a stable MAC-derived ID. */
+const char *bm_device_gateway_id(void);
+
+/* False means neither the configured ID nor the device MAC was available. */
+bool bm_device_gateway_id_is_valid(void);
 
 #ifdef __cplusplus
 }

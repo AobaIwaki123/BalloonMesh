@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 
 #include "bm_config.h"
+#include "bm_device_id.h"
 #include "gateway_mesh.h"
 #include "gateway_spool.h"
 
@@ -69,7 +70,9 @@ static void build_uri(void) {
         scheme = "ws://";
         rest = url + 7;
     } else {
-        scheme = "ws://";
+        /* A URL without a scheme is treated as TLS; setup() already refused
+         * anything that is not https:// in non-development builds. */
+        scheme = "wss://";
         rest = url;
     }
     size_t rest_len = strlen(rest);
@@ -84,7 +87,7 @@ static bool send_hello(void) {
     snprintf(hello, sizeof(hello),
              "{\"type\":\"hello\",\"gatewayId\":\"%s\",\"firmware\":\"%s\","
              "\"token\":\"%s\",\"provisioned\":%s,\"spoolPending\":%u}",
-             BM_GATEWAY_ID, BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
+             bm_device_gateway_id(), BM_FIRMWARE_VERSION, BM_GATEWAY_TOKEN,
              /* Reporting a hard-coded "true" made the server route downlinks
               * to a gateway whose vendor models were not bound yet, and those
               * commands were discarded. */
@@ -233,11 +236,11 @@ void bm_gateway_ws_start(void) {
     config.disable_auto_reconnect = false;
     config.ping_interval_sec = 15;
     config.pingpong_timeout_sec = 30;
-    config.skip_cert_common_name_check = true;
+    /* Always verify the certificate chain AND the host name.  Transport
+     * policy (https only, CA present) is enforced in setup() and bm_config.h. */
+    config.skip_cert_common_name_check = false;
 #ifdef BM_TLS_CA_CERT
     config.cert_pem = BM_TLS_CA_CERT;
-#else
-    ESP_LOGW(TAG, "no BM_TLS_CA_CERT; WSS certificate is not pinned");
 #endif
     s_client = esp_websocket_client_init(&config);
     if (s_client == NULL) {
