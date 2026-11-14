@@ -6,7 +6,6 @@
 
 #include <string.h>
 
-#include "esp_event.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -25,30 +24,44 @@
 #include "bm_config.h"
 
 static const char *TAG = "positioning";
+static constexpr uint32_t kFtmTimeoutMs = 1000u;
 
 static const uint8_t s_anchor_token[8] = BM_ANCHOR_TOKEN_BYTES;
+static const IPAddress s_anchor_station_ip(192, 168, 4, 2);
+static const IPAddress s_anchor_gateway_ip(192, 168, 4, 1);
+static const IPAddress s_anchor_subnet(255, 255, 255, 0);
 static SemaphoreHandle_t s_ftm_done;
+static volatile bool s_ftm_active;
 static volatile bool s_ftm_ok;
 static volatile uint32_t s_ftm_distance_cm;
 
-static void ftm_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    (void)arg;
-    (void)base;
-    if (id != WIFI_EVENT_FTM_REPORT) {
+static void ftm_event_handler(arduino_event_t *event) {
+    if (event == NULL || event->event_id != ARDUINO_EVENT_WIFI_FTM_REPORT) {
         return;
     }
-    wifi_event_ftm_report_t *report = (wifi_event_ftm_report_t *)data;
-    s_ftm_ok = report->status == FTM_STATUS_SUCCESS && report->dist_est > 0;
-    s_ftm_distance_cm = report->dist_est;
+
+    wifi_event_ftm_report_t *report = &event->event_info.wifi_ftm_report;
+    const int status = report->status;
+    const uint32_t distance_cm = report->dist_est;
     if (report->ftm_report_data != NULL) {
         free(report->ftm_report_data);
         report->ftm_report_data = NULL;
     }
+
+    // Ignore a late report from a session that already timed out.  This keeps
+    // it from being mistaken for the next anchor's measurement.
+    if (!s_ftm_active) {
+        return;
+    }
+
+    s_ftm_ok = status == FTM_STATUS_SUCCESS && distance_cm > 0;
+    s_ftm_distance_cm = distance_cm;
+    s_ftm_active = false;
     if (s_ftm_done != NULL) {
         xSemaphoreGive(s_ftm_done);
     }
-    ESP_LOGI(TAG, "FTM status=%d dist=%lu cm", (int)report->status,
-             (unsigned long)report->dist_est);
+    ESP_LOGI(TAG, "FTM status=%d dist=%lu cm", status,
+             (unsigned long)distance_cm);
 }
 
 static bool fetch_anchor_data(uint8_t anchor_id, bm_anchor_response_t *response) {
@@ -105,14 +118,23 @@ static void sync_clock_if_possible(const bm_anchor_response_t *response) {
 static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
                            uint8_t *valid_count) {
     ESP_LOGI(TAG, "connecting to %s", anchor->ssid);
+    // The anchor network is an isolated point-to-point SoftAP.  Use a fixed
+    // station address so the UDP exchange does not depend on DHCP completing
+    // before the short Wi-Fi connection window expires.
+    if (!WiFi.config(s_anchor_station_ip, s_anchor_gateway_ip, s_anchor_subnet)) {
+        ESP_LOGW(TAG, "anchor station IP configuration failed");
+    }
     WiFi.begin(anchor->ssid, BM_ANCHOR_WIFI_PASSWORD);
+    // FTM only yields valid measurements on a 20 MHz link (the anchor AP is
+    // HT20 too); an HT40 association ends with "No valid FTM Measurements".
+    esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
     uint32_t start = millis();
-    while (WiFi.status() != WL_CONNECTED && (uint32_t)(millis() - start) < 12000u) {
+    while (WiFi.status() != WL_CONNECTED && (uint32_t)(millis() - start) < BM_ANCHOR_CONNECT_TIMEOUT_MS) {
         delay(100);
     }
     if (WiFi.status() != WL_CONNECTED) {
         ESP_LOGW(TAG, "connect to %s failed", anchor->ssid);
-        WiFi.disconnect();
+        WiFi.disconnect(true, false);
         return false;
     }
 
@@ -133,27 +155,29 @@ static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
     bool measured = false;
     if (s_ftm_done != NULL) {
         xSemaphoreTake(s_ftm_done, 0);
+        s_ftm_active = false;
         s_ftm_ok = false;
         s_ftm_distance_cm = 0;
 
-        wifi_ftm_initiator_cfg_t config = {};
-        memcpy(config.resp_mac, ap.bssid, sizeof(config.resp_mac));
-        config.channel = ap.primary;
-        config.frm_count = 16;
-        config.burst_period = 0;
-
-        esp_err_t err = esp_wifi_ftm_initiate_session(&config);
-        if (err == ESP_OK) {
-            if (xSemaphoreTake(s_ftm_done, pdMS_TO_TICKS(8000)) == pdTRUE) {
+        // Use the Arduino wrapper so the FTM report is delivered through the
+        // same event bridge as the framework's official FTM example.  The
+        // explicit channel/BSSID avoids selecting a different AP with a
+        // duplicate or stale scan result.
+        s_ftm_active = WiFi.initiateFTM(16, 2, ap.primary, ap.bssid);
+        if (s_ftm_active) {
+            if (xSemaphoreTake(s_ftm_done, pdMS_TO_TICKS(kFtmTimeoutMs)) == pdTRUE) {
                 // The wire field is uint16 centimetres; a longer range would
                 // be clamped and reported as a wrong (much shorter) distance.
                 measured = s_ftm_ok &&
                            s_ftm_distance_cm > 0 &&
                            s_ftm_distance_cm <= 65535u;
+            } else {
+                ESP_LOGW(TAG, "FTM too long; skipping anchor %u", anchor->id);
             }
+            s_ftm_active = false;
             esp_wifi_ftm_end_session();
         } else {
-            ESP_LOGW(TAG, "FTM initiate failed: %s", esp_err_to_name(err));
+            ESP_LOGW(TAG, "FTM initiate failed");
         }
     }
 
@@ -185,8 +209,6 @@ static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
 
 static void positioning_task(void *argument) {
     (void)argument;
-    ESP_ERROR_CHECK(esp_event_handler_register(
-        WIFI_EVENT, WIFI_EVENT_FTM_REPORT, &ftm_event_handler, NULL));
 
     uint8_t batch_id = 0;
     bool first = true;
@@ -213,9 +235,17 @@ static void positioning_task(void *argument) {
         }
 
         batch_id = (uint8_t)(batch_id + 1u);
-        uint32_t delay_ms = first ? 5000u : (180000u + (esp_random() % 30001u));
+        uint32_t delay_ms;
+        if (valid_count == 0) {
+            // When no anchors are reachable, back off to avoid starving BLE Mesh radio
+            delay_ms = 30000u + (esp_random() % 10001u);
+        } else if (first) {
+            delay_ms = 5000u;
+        } else {
+            delay_ms = 180000u + (esp_random() % 30001u);
+        }
         first = false;
-        ESP_LOGI(TAG, "cycle complete; next in %lu ms", (unsigned long)delay_ms);
+        ESP_LOGI(TAG, "cycle complete (valid=%u); next in %lu ms", (unsigned)valid_count, (unsigned long)delay_ms);
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
 }
@@ -224,6 +254,7 @@ void bm_positioning_start(void) {
     s_ftm_done = xSemaphoreCreateBinary();
     WiFi.persistent(false);
     WiFi.mode(WIFI_STA);
+    WiFi.onEvent(ftm_event_handler, ARDUINO_EVENT_WIFI_FTM_REPORT);
     /* BLE and Wi-Fi coexistence requires Wi-Fi modem sleep on ESP32-C3. */
     WiFi.setSleep(true);
     xTaskCreate(positioning_task, "positioning", 8192, NULL, 4, NULL);

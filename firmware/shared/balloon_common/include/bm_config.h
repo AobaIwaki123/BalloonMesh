@@ -43,6 +43,9 @@
 #define BM_ANCHOR_TOKEN_BYTES { 'B', 'A', 'L', 'L', 'O', 'O', 'N', '1' }
 #define BM_ANCHOR_MAX 8u
 #define BM_ANCHOR_WIFI_CHANNEL 6u
+// Association can take several seconds when the balloon is far from an
+// anchor; keep enough time for the first scan before declaring it unreachable.
+#define BM_ANCHOR_CONNECT_TIMEOUT_MS 12000u
 
 typedef struct {
     uint8_t id;
