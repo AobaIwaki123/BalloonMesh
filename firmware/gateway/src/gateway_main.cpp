@@ -330,6 +330,11 @@ void setup() {
     bm_gateway_mesh_init();
     Serial.println("[GW] mesh initialized");
     Serial.flush();
+
+#if !defined(BM_GATEWAY_USE_WEBSOCKET) || !BM_GATEWAY_USE_WEBSOCKET
+    xTaskCreate(upload_events_task, "gateway_http_tx", 6144, NULL, 4, NULL);
+    xTaskCreate(poll_commands_task, "gateway_http_rx", 6144, NULL, 4, NULL);
+#endif
 }
 
 void loop() {

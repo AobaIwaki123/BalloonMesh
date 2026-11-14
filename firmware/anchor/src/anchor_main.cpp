@@ -53,7 +53,8 @@ static void gps_task(void *argument) {
 
                     const int64_t previous_utc_ms = parsed.utc_ms;
                     const bool previous_time_valid = parsed.time_valid;
-                    if (bm_nmea_feed_line(&parsed, line)) {
+                    bool position_updated = false;
+                    if (bm_nmea_feed_line_with_position_update(&parsed, line, &position_updated)) {
                         /* Stamp as close to reception as possible.  The
                          * residual bias is the sentence transmission time
                          * (~70 ms for one sentence at 9600 baud), not the
@@ -67,7 +68,7 @@ static void gps_task(void *argument) {
                         if (time_advanced) {
                             s_time_mono_us = received_us;
                         }
-                        if (parsed.position_valid) {
+                        if (position_updated) {
                             s_fix_mono_us = received_us;
                         }
                         portEXIT_CRITICAL(&s_state_lock);

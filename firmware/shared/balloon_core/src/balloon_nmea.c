@@ -70,24 +70,24 @@ static bool parse_hms(const char *value, int *hour, int *minute, int *second,
     return *hour < 24 && *minute < 60 && *second <= 60;
 }
 
-static void handle_gga(bm_nmea_state_t *state, char *fields[], int count) {
+static bool handle_gga(bm_nmea_state_t *state, char *fields[], int count) {
     if (count < 10) {
-        return;
+        return false;
     }
     int fix = atoi(fields[6]);
     if (fix <= 0) {
         state->position_valid = false;
-        return;
+        return false;
     }
     int32_t lat_e7;
     int32_t lon_e7;
     if (!parse_decimal_coordinate(fields[2], fields[3], &lat_e7) ||
         !parse_decimal_coordinate(fields[4], fields[5], &lon_e7)) {
-        return;
+        return false;
     }
     int hour, minute, second, millisecond;
     if (!parse_hms(fields[1], &hour, &minute, &second, &millisecond)) {
-        return;
+        return false;
     }
     int32_t alt_cm = (int32_t)lround(strtod(fields[9], NULL) * 100.0);
 
@@ -103,25 +103,26 @@ static void handle_gga(bm_nmea_state_t *state, char *fields[], int count) {
                         millisecond;
         state->time_valid = true;
     }
+    return true;
 }
 
-static void handle_rmc(bm_nmea_state_t *state, char *fields[], int count) {
+static bool handle_rmc(bm_nmea_state_t *state, char *fields[], int count) {
     if (count < 10) {
-        return;
+        return false;
     }
     if (fields[2][0] != 'A') {
-        return;
+        return false;
     }
     int hour, minute, second, millisecond;
     if (!parse_hms(fields[1], &hour, &minute, &second, &millisecond)) {
-        return;
+        return false;
     }
     if (strlen(fields[9]) < 6) {
-        return;
+        return false;
     }
     int day = 0, month = 0, year = 0;
     if (sscanf(fields[9], "%2d%2d%2d", &day, &month, &year) != 3) {
-        return;
+        return false;
     }
     if (year < 70) {
         year += 2000;
@@ -146,6 +147,7 @@ static void handle_rmc(bm_nmea_state_t *state, char *fields[], int count) {
         state->lat_e7 = lat_e7;
         state->lon_e7 = lon_e7;
     }
+    return have_position;
 }
 
 void bm_nmea_init(bm_nmea_state_t *state) {
@@ -154,7 +156,11 @@ void bm_nmea_init(bm_nmea_state_t *state) {
     }
 }
 
-bool bm_nmea_feed_line(bm_nmea_state_t *state, const char *line) {
+bool bm_nmea_feed_line_with_position_update(bm_nmea_state_t *state, const char *line,
+                                             bool *position_updated) {
+    if (position_updated != NULL) {
+        *position_updated = false;
+    }
     if (state == NULL || line == NULL || line[0] != '$') {
         return false;
     }
@@ -191,12 +197,18 @@ bool bm_nmea_feed_line(bm_nmea_state_t *state, const char *line) {
     }
 
     if (strcmp(fields[0] + 3, "GGA") == 0) {
-        handle_gga(state, fields, count);
+        bool updated = handle_gga(state, fields, count);
+        if (position_updated != NULL) *position_updated = updated;
         return true;
     }
     if (strcmp(fields[0] + 3, "RMC") == 0) {
-        handle_rmc(state, fields, count);
+        bool updated = handle_rmc(state, fields, count);
+        if (position_updated != NULL) *position_updated = updated;
         return true;
     }
     return false;
+}
+
+bool bm_nmea_feed_line(bm_nmea_state_t *state, const char *line) {
+    return bm_nmea_feed_line_with_position_update(state, line, NULL);
 }

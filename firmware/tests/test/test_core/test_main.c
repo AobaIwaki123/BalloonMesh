@@ -290,15 +290,34 @@ static void test_nmea_parser(void) {
     TEST_ASSERT_INT_WITHIN(2, 481173000, state.lat_e7);
     TEST_ASSERT_INT_WITHIN(2, 115166667, state.lon_e7);
 
+    bool position_updated = false;
+    TEST_ASSERT_TRUE(bm_nmea_feed_line_with_position_update(&state, sentence, &position_updated));
+    TEST_ASSERT_TRUE(position_updated); /* A stationary fix is still fresh. */
+
+    make_nmea("GNRMC,123520,V,,,,,,,230394,,,", sentence, sizeof(sentence));
+    TEST_ASSERT_TRUE(bm_nmea_feed_line_with_position_update(&state, sentence, &position_updated));
+    TEST_ASSERT_FALSE(position_updated);
+    TEST_ASSERT_TRUE(state.position_valid); /* It must age out, not be refreshed. */
+
+    make_nmea("GNRMC,123521,A,,,,,,,230394,,,", sentence, sizeof(sentence));
+    TEST_ASSERT_TRUE(bm_nmea_feed_line_with_position_update(&state, sentence, &position_updated));
+    TEST_ASSERT_FALSE(position_updated);
+
+    position_updated = true;
+    TEST_ASSERT_FALSE(bm_nmea_feed_line_with_position_update(&state, "$GNRMC,broken*00", &position_updated));
+    TEST_ASSERT_FALSE(position_updated);
+
     make_nmea("GNGGA,123520.00,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,",
               sentence, sizeof(sentence));
-    TEST_ASSERT_TRUE(bm_nmea_feed_line(&state, sentence));
+    TEST_ASSERT_TRUE(bm_nmea_feed_line_with_position_update(&state, sentence, &position_updated));
+    TEST_ASSERT_TRUE(position_updated);
     TEST_ASSERT_EQUAL_INT64(764426120000LL, state.utc_ms);
     TEST_ASSERT_EQUAL_INT32(54540, state.alt_cm);
 
     make_nmea("GNGGA,123520.00,4807.038,N,01131.000,E,0,00,99.9,0.0,M,0.0,M,,",
               sentence, sizeof(sentence));
-    TEST_ASSERT_TRUE(bm_nmea_feed_line(&state, sentence));
+    TEST_ASSERT_TRUE(bm_nmea_feed_line_with_position_update(&state, sentence, &position_updated));
+    TEST_ASSERT_FALSE(position_updated);
     TEST_ASSERT_FALSE(state.position_valid);
     TEST_ASSERT_FALSE(bm_nmea_feed_line(&state, "$GNRMC,broken*00"));
 }

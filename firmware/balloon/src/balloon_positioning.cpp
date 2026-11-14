@@ -27,9 +27,6 @@ static const char *TAG = "positioning";
 static constexpr uint32_t kFtmTimeoutMs = 1000u;
 
 static const uint8_t s_anchor_token[8] = BM_ANCHOR_TOKEN_BYTES;
-static const IPAddress s_anchor_station_ip(192, 168, 4, 2);
-static const IPAddress s_anchor_gateway_ip(192, 168, 4, 1);
-static const IPAddress s_anchor_subnet(255, 255, 255, 0);
 static SemaphoreHandle_t s_ftm_done;
 static volatile bool s_ftm_active;
 static volatile bool s_ftm_ok;
@@ -118,11 +115,12 @@ static void sync_clock_if_possible(const bm_anchor_response_t *response) {
 static bool measure_anchor(const bm_anchor_entry_t *anchor, uint8_t batch_id,
                            uint8_t *valid_count) {
     ESP_LOGI(TAG, "connecting to %s", anchor->ssid);
-    // The anchor network is an isolated point-to-point SoftAP.  Use a fixed
-    // station address so the UDP exchange does not depend on DHCP completing
-    // before the short Wi-Fi connection window expires.
-    if (!WiFi.config(s_anchor_station_ip, s_anchor_gateway_ip, s_anchor_subnet)) {
-        ESP_LOGW(TAG, "anchor station IP configuration failed");
+    // Reset any previous static configuration and obtain a unique address
+    // from the anchor's DHCP server for each association.
+    if (!WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE)) {
+        ESP_LOGW(TAG, "anchor DHCP configuration failed");
+        WiFi.disconnect(true, false);
+        return false;
     }
     WiFi.begin(anchor->ssid, BM_ANCHOR_WIFI_PASSWORD);
     // FTM only yields valid measurements on a 20 MHz link (the anchor AP is
