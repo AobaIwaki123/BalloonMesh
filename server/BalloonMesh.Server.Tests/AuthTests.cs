@@ -23,21 +23,7 @@ public sealed class AuthTests
     [Fact]
     public async Task IdentitySupportsMultipleUsersAndRoles()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Authentication:Mode"] = "Local",
-                ["Authentication:Local:Enabled"] = "true",
-                ["Authentication:Local:Users:0:Username"] = "admin",
-                ["Authentication:Local:Users:0:Password"] = "admin-password",
-                ["Authentication:Local:Users:0:Role"] = "Admin",
-                ["Authentication:Local:Users:1:Username"] = "operator",
-                ["Authentication:Local:Users:1:Password"] = "operator-password",
-                ["Authentication:Local:Users:1:Role"] = "Operator"
-            })
-            .Build();
         var services = new ServiceCollection()
-            .AddSingleton<IConfiguration>(configuration)
             .AddLogging();
         services.AddIdentityCore<ApplicationUser>().AddRoles<IdentityRole>();
         services.AddSingleton<IPasswordHasher<ApplicationUser>, PasswordHasher<ApplicationUser>>();
@@ -78,6 +64,22 @@ public sealed class AuthTests
 
         Assert.False(AuthSetup.OidcEnabled(configuration));
         Assert.True(AuthSetup.DiscordEnabled(configuration));
+    }
+
+    [Fact]
+    public void LegacyOidcConfigurationIsDetectedWhenModeIsOmitted()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Authentication:Oidc:Authority"] = "https://idp.example",
+                ["Authentication:Oidc:ClientId"] = "client"
+            })
+            .Build();
+
+        Assert.Equal(AuthSetup.OidcMode, AuthSetup.ResolveMode(configuration));
+        Assert.True(AuthSetup.OidcEnabled(configuration));
+        Assert.False(AuthSetup.LocalEnabled(configuration));
     }
 
     [Theory]

@@ -68,7 +68,8 @@ public static class IdentityBootstrapper
                 user = new ApplicationUser
                 {
                     UserName = username,
-                    DisplayName = string.IsNullOrWhiteSpace(displayName) ? username : displayName
+                    DisplayName = string.IsNullOrWhiteSpace(displayName) ? username : displayName,
+                    LockoutEnabled = true
                 };
 
                 var passwordEnvironmentVariable = section["PasswordEnvironmentVariable"]?.Trim();
@@ -87,10 +88,27 @@ public static class IdentityBootstrapper
                 EnsureSuccess(await userManager.CreateAsync(user, plainPassword),
                     $"create local user '{username}'");
             }
-            else if (!string.IsNullOrWhiteSpace(displayName) &&
-                     !string.Equals(user.DisplayName, displayName, StringComparison.Ordinal))
+
+            if (user is null)
+            {
+                throw new InvalidOperationException(
+                    $"Unable to load local user '{username}' after creation.");
+            }
+
+            var changed = false;
+            if (!user.LockoutEnabled)
+            {
+                user.LockoutEnabled = true;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(displayName) &&
+                !string.Equals(user.DisplayName, displayName, StringComparison.Ordinal))
             {
                 user.DisplayName = displayName;
+                changed = true;
+            }
+            if (changed)
+            {
                 EnsureSuccess(await userManager.UpdateAsync(user),
                     $"update local user '{username}'");
             }
@@ -103,11 +121,18 @@ public static class IdentityBootstrapper
             {
                 EnsureSuccess(await userManager.RemoveFromRolesAsync(user, rolesToRemove),
                     $"remove old roles from local user '{username}'");
+                changed = true;
             }
             if (!currentRoles.Contains(role, StringComparer.OrdinalIgnoreCase))
             {
                 EnsureSuccess(await userManager.AddToRoleAsync(user, role),
                     $"assign role '{role}' to local user '{username}'");
+                changed = true;
+            }
+            if (changed)
+            {
+                EnsureSuccess(await userManager.UpdateSecurityStampAsync(user),
+                    $"refresh security stamp for local user '{username}'");
             }
         }
     }

@@ -32,6 +32,7 @@
     <div class="providers">
       {#if model.localEnabled}
         <form class="local-login" method="post" action="/auth/login/local">
+          <input type="hidden" name="__RequestVerificationToken" value={model.antiforgeryToken ?? ''} />
           <label>
             <span>Username</span>
             <input name="username" autocomplete="username" required />
@@ -63,7 +64,7 @@
       {/if}
     </div>
 
-    {#if !model.oidcEnabled && !model.discordEnabled && !model.mockEnabled}
+    {#if !model.oidcEnabled && !model.discordEnabled && !model.localEnabled && !model.mockEnabled}
       <p class="empty">No login provider is configured. Set OIDC or Discord secrets, or enable the mock provider in Development.</p>
     {/if}
 
