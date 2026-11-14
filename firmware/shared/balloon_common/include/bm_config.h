@@ -111,8 +111,10 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
 #define BM_GPS_BAUD 9600
 
 /* Gateway deployment configuration.  The gateway PlatformIO project injects
- * these values from the build environment; do not store deployment endpoints
- * or credentials in this shared header. */
+ * the endpoint and credentials from the build environment; do not store
+ * deployment endpoints or credentials in this shared header.  The gateway ID
+ * is optional because bm_device_gateway_id() derives one from the Bluetooth
+ * MAC when no explicit override is supplied. */
 #ifndef BM_GATEWAY_TOKEN
 #define BM_GATEWAY_TOKEN ""
 #endif
@@ -157,12 +159,10 @@ static const bm_anchor_entry_t BM_ANCHORS[] = {
 #endif
 
 #if defined(BM_ROLE_GATEWAY)
-/* A gateway image must be built with deployment-specific identity, endpoint,
+/* A gateway image must be built with a deployment-specific endpoint,
  * authentication token, and Wi-Fi credentials.  Keep the diagnostics generic
  * so a missing value cannot echo a secret into build logs. */
 #if defined(__cplusplus)
-static_assert(sizeof(BM_GATEWAY_ID) > 1,
-              "BM_GATEWAY_ID must be supplied for gateway deployment");
 static_assert(sizeof(BM_SERVER_URL) > 1,
               "BM_SERVER_URL must be supplied for gateway deployment");
 static_assert(sizeof(BM_GATEWAY_TOKEN) > 1,
@@ -172,8 +172,6 @@ static_assert(sizeof(BM_GATEWAY_WIFI_SSID) > 1,
 static_assert(sizeof(BM_GATEWAY_WIFI_PASSWORD) > 1,
               "BM_GATEWAY_WIFI_PASSWORD must be supplied for gateway deployment");
 #else
-_Static_assert(sizeof(BM_GATEWAY_ID) > 1,
-               "BM_GATEWAY_ID must be supplied for gateway deployment");
 _Static_assert(sizeof(BM_SERVER_URL) > 1,
                "BM_SERVER_URL must be supplied for gateway deployment");
 _Static_assert(sizeof(BM_GATEWAY_TOKEN) > 1,
