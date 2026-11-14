@@ -18,8 +18,10 @@ public sealed record LoginPageModel(
     string Title,
     bool OidcEnabled,
     bool DiscordEnabled,
+    bool LocalEnabled,
     bool MockEnabled,
-    string? Error);
+    string? Error,
+    string? AntiforgeryToken);
 
 public sealed record MockProvisioningDevice(
     string Id,

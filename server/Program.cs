@@ -8,6 +8,9 @@ using BalloonMesh.Server.Services;
 using SvelteSharp;
 using SvelteSharp.AspNetCore;
 using SvelteSharp.Jint;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -17,6 +20,22 @@ builder.Services
         options.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase);
 
 builder.Services.AddBalloonMeshAuth(builder.Configuration, builder.Environment);
+builder.Services.AddAntiforgery();
+var identityConnectionString = builder.Configuration.GetConnectionString("BalloonMesh")
+    ?? Environment.GetEnvironmentVariable("BALLOONMESH_CONNECTION")
+    ?? Environment.GetEnvironmentVariable("DATABASE_URL")
+    ?? "Host=127.0.0.1;Port=5432;Database=balloonmesh;Username=balloonmesh;Password=balloonmesh;Pooling=true;Maximum Pool Size=20";
+builder.Services.AddDbContext<BalloonMeshIdentityDbContext>(options =>
+    options.UseNpgsql(identityConnectionString));
+builder.Services.AddIdentityCore<ApplicationUser>(options =>
+    {
+        options.Lockout.AllowedForNewUsers = true;
+        options.Lockout.MaxFailedAccessAttempts = 5;
+        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+    })
+    .AddRoles<IdentityRole>()
+    .AddEntityFrameworkStores<BalloonMeshIdentityDbContext>()
+    .AddSignInManager();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<DataStore>();
 builder.Services.AddSingleton<FleetService>();
@@ -44,6 +63,15 @@ svelte.UseJintForCompiler()
       .UseJintForSsr();
 
 var app = builder.Build();
+
+using (var identityScope = app.Services.CreateScope())
+{
+    var identityDb = identityScope.ServiceProvider
+        .GetRequiredService<BalloonMeshIdentityDbContext>();
+    await identityDb.Database.MigrateAsync();
+    await IdentityBootstrapper.SeedAsync(identityScope.ServiceProvider,
+        app.Configuration);
+}
 
 var dataStore = app.Services.GetRequiredService<DataStore>();
 dataStore.Initialize();
@@ -86,7 +114,8 @@ app.Map("/ws/gateway", async context =>
         context.RequestAborted);
 });
 
-app.MapGet("/login", (HttpContext context, IConfiguration configuration) =>
+app.MapGet("/login", (HttpContext context, IConfiguration configuration,
+    IAntiforgery antiforgery) =>
 {
     var canView = context.User.Identity?.IsAuthenticated == true &&
                   (context.User.IsInRole(AuthRoles.Viewer) ||
@@ -103,14 +132,19 @@ app.MapGet("/login", (HttpContext context, IConfiguration configuration) =>
         // forever; show the login page with an explanation instead.
         error = "Your account has no access role.";
     }
+    var antiforgeryToken = AuthSetup.LocalEnabled(configuration)
+        ? antiforgery.GetAndStoreTokens(context).RequestToken
+        : null;
     return Svelte.View(
         "Login",
         new LoginPageModel(
             "Sign in to Balloon Mesh",
             AuthSetup.OidcEnabled(configuration),
             AuthSetup.DiscordEnabled(configuration),
+            AuthSetup.LocalEnabled(configuration),
             AuthSetup.MockEnabled(configuration),
-            string.IsNullOrWhiteSpace(error) ? null : error),
+            string.IsNullOrWhiteSpace(error) ? null : error,
+            antiforgeryToken),
         SvelteRenderMode.Client,
         new PageMetadata("Sign in", new Dictionary<string, string>
         {
