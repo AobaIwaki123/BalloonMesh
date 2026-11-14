@@ -26,6 +26,11 @@ void bm_nmea_init(bm_nmea_state_t *state);
  * accepted (checksum valid).  RMC supplies date/time, GGA supplies altitude. */
 bool bm_nmea_feed_line(bm_nmea_state_t *state, const char *line);
 
+/* Also reports whether this sentence supplied a valid position, including
+ * when the coordinates are unchanged from the previous fix. */
+bool bm_nmea_feed_line_with_position_update(bm_nmea_state_t *state, const char *line,
+                                             bool *position_updated);
+
 #ifdef __cplusplus
 }
 #endif
