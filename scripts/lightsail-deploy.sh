@@ -25,6 +25,10 @@ set -euo pipefail
 #   --token <TOKEN>    Gateway 認証トークン
 #   --help             ヘルプを表示
 #
+# Environment:
+#   AUTH_MODE=Local
+#   BALLOONMESH_ADMIN_PASSWORD=<初期adminパスワード>
+#
 # Examples:
 #   ./scripts/lightsail-deploy.sh --domain mesh.example.com
 #   ./scripts/lightsail-deploy.sh --domain mesh.example.com --prod --token secret123
@@ -36,6 +40,8 @@ BUNDLE_ID="small_3_0"
 MODE="--demo"
 DOMAIN="${LIGHTSAIL_DOMAIN:-}"
 GATEWAY_TOKEN="${GATEWAY_TOKEN:-}"
+AUTH_MODE="${AUTH_MODE:-Local}"
+ADMIN_PASSWORD="${BALLOONMESH_ADMIN_PASSWORD:-}"
 REGION="${AWS_DEFAULT_REGION:-ap-northeast-1}"
 REMOTE_USER="ubuntu"
 REMOTE_DIR="/home/ubuntu/BalloonMesh"
@@ -112,6 +118,15 @@ if [[ -z "$DOMAIN" ]]; then
   echo "Error: HTTPSデプロイには公開ドメインが必要です。--domain mesh.example.com を指定してください。" >&2
   exit 2
 fi
+
+case "$AUTH_MODE" in
+  Local|local)
+    if [[ -z "$ADMIN_PASSWORD" ]]; then
+      echo "Error: Local認証にはBALLOONMESH_ADMIN_PASSWORDの設定が必要です。" >&2
+      exit 2
+    fi
+    ;;
+esac
 
 if [[ "$DOMAIN" =~ [/:[:space:]] || "$DOMAIN" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
   echo "Error: --domain にはスキームやポートを含めず、ホスト名だけを指定してください: $DOMAIN" >&2
@@ -270,7 +285,7 @@ rsync -avz \
 
 # 3. Caddy + アプリケーションのビルドと起動
 echo "==> HTTPSコンテナをビルド・起動しています (SIMULATION_ENABLED=${SIMULATION_ENABLED})..."
-REMOTE_ENV="SIMULATION_ENABLED=$(printf '%q' "$SIMULATION_ENABLED") GATEWAY_TOKEN=$(printf '%q' "$GATEWAY_TOKEN") PUBLIC_DOMAIN=$(printf '%q' "$DOMAIN")"
+REMOTE_ENV="SIMULATION_ENABLED=$(printf '%q' "$SIMULATION_ENABLED") GATEWAY_TOKEN=$(printf '%q' "$GATEWAY_TOKEN") PUBLIC_DOMAIN=$(printf '%q' "$DOMAIN") AUTH_MODE=$(printf '%q' "$AUTH_MODE") MOCK_AUTH_ENABLED=false BALLOONMESH_ADMIN_PASSWORD=$(printf '%q' "$ADMIN_PASSWORD")"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${HOST}" \
   "cd ${REMOTE_DIR} && sudo env ${REMOTE_ENV} docker compose -f compose.yml -f compose.https.yml up -d --build"
 
