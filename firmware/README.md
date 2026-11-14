@@ -44,6 +44,9 @@ pio run
 pio run -t upload
 
 cd ../gateway
+# Set BM_GATEWAY_ID, BM_SERVER_URL, BM_GATEWAY_TOKEN, BM_WIFI_SSID, and
+# BM_WIFI_PASS in the deployment environment before building.
+# Example: BM_SERVER_URL=https://example.com (no trailing slash)
 pio run
 pio run -t upload
 ```
@@ -83,7 +86,7 @@ balloon は XIAO ESP32C3 の **D0/D1/D2 (GPIO2/3/4)** を **LEDC 5kHz / 8bit** �
 ### gateway
 - `platformio.ini` の `BM_GATEWAY_USE_WEBSOCKET=1`（既定）
   - `0` にすると HTTP ポーリングへ切り替え
-- `bm_config.h` の `BM_GATEWAY_ID` / `BM_SERVER_URL` / Wi-Fi 設定
+- `BM_GATEWAY_ID` / `BM_SERVER_URL` / `BM_GATEWAY_TOKEN` / `BM_WIFI_SSID` / `BM_WIFI_PASS` をビルド時の環境変数から渡す。`BM_SERVER_URL` は本番では `https://` ドメインを指定し、値を `platformio.ini` やソースへ記録しない。未設定のGatewayビルドはコンパイル時に拒否する
 - WSS/HTTPS の CA は `-DBM_TLS_CA_CERT=\"...\"` で指定
 
 ## 追加実装

@@ -141,8 +141,8 @@ static void websocket_event_handler(void *arg, esp_event_base_t base, int32_t id
     auto *event = (esp_websocket_event_data_t *)data;
     switch ((esp_websocket_event_id_t)id) {
         case WEBSOCKET_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "connected to %s", s_uri);
-            Serial.printf("[GW WS] Connected to %s!\n", s_uri);
+            ESP_LOGI(TAG, "connected to configured gateway server");
+            Serial.println("[GW WS] Connected to configured gateway server!");
             Serial.flush();
             send_hello();
             s_connected = true;
@@ -244,7 +244,7 @@ void bm_gateway_ws_start(void) {
         return;
     }
     xTaskCreate(ws_sender_task, "gateway_ws_tx", 6144, NULL, 4, NULL);
-    ESP_LOGI(TAG, "websocket transport started: %s", s_uri);
+    ESP_LOGI(TAG, "websocket transport started");
 }
 
 #else

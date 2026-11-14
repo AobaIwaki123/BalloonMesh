@@ -181,7 +181,7 @@ static void upload_events_task(void *argument) {
             }
             http.end();
         } else {
-            ESP_LOGW(TAG, "HTTP begin failed: %s", url);
+            ESP_LOGW(TAG, "HTTP begin failed");
         }
         free(body);
         vTaskDelay(pdMS_TO_TICKS(20));
@@ -262,8 +262,8 @@ static void wifi_task(void *argument) {
     WiFi.setSleep(true);
     for (;;) {
         if (WiFi.status() != WL_CONNECTED) {
-            ESP_LOGI(TAG, "connecting Wi-Fi SSID=%s", BM_GATEWAY_WIFI_SSID);
-            Serial.printf("[GW] connecting Wi-Fi SSID=%s\n", BM_GATEWAY_WIFI_SSID);
+            ESP_LOGI(TAG, "connecting to configured Wi-Fi");
+            Serial.println("[GW] connecting to configured Wi-Fi");
             Serial.flush();
             WiFi.begin(BM_GATEWAY_WIFI_SSID, BM_GATEWAY_WIFI_PASSWORD);
             uint32_t start = millis();
