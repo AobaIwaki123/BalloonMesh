@@ -322,6 +322,40 @@ static void test_nmea_parser(void) {
     TEST_ASSERT_FALSE(bm_nmea_feed_line(&state, "$GNRMC,broken*00"));
 }
 
+static void test_nmea_rmc_date_bounds(void) {
+    const char *invalid_dates[] = {"000199", "320199", "010099", "011399"};
+    bm_nmea_state_t state;
+    char body[128], sentence[160];
+    bm_nmea_init(&state);
+
+    for (size_t i = 0; i < sizeof(invalid_dates) / sizeof(invalid_dates[0]); ++i) {
+        snprintf(body, sizeof(body), "GNRMC,123519,A,4807.038,N,01131.000,E,0,0,%s", invalid_dates[i]);
+        make_nmea(body, sentence, sizeof(sentence));
+        TEST_ASSERT_TRUE(bm_nmea_feed_line(&state, sentence));
+        TEST_ASSERT_FALSE(state.time_valid);
+        TEST_ASSERT_EQUAL_INT(0, state.year);
+    }
+
+    make_nmea("GNRMC,123519,A,4807.038,N,01131.000,E,0,0,311299", sentence, sizeof(sentence));
+    TEST_ASSERT_TRUE(bm_nmea_feed_line(&state, sentence));
+    TEST_ASSERT_TRUE(state.time_valid);
+    int64_t utc_ms = state.utc_ms;
+    for (size_t i = 0; i < sizeof(invalid_dates) / sizeof(invalid_dates[0]); ++i) {
+        snprintf(body, sizeof(body), "GNRMC,123520,A,4807.038,N,01131.000,E,0,0,%s", invalid_dates[i]);
+        make_nmea(body, sentence, sizeof(sentence));
+        TEST_ASSERT_TRUE(bm_nmea_feed_line(&state, sentence));
+        TEST_ASSERT_EQUAL_INT64(utc_ms, state.utc_ms);
+        TEST_ASSERT_EQUAL_INT(1999, state.year);
+        TEST_ASSERT_EQUAL_INT(12, state.month);
+        TEST_ASSERT_EQUAL_INT(31, state.day);
+    }
+    make_nmea("GNRMC,123519,A,4807.038,N,01131.000,E,0,0,010100", sentence, sizeof(sentence));
+    TEST_ASSERT_TRUE(bm_nmea_feed_line(&state, sentence));
+    TEST_ASSERT_EQUAL_INT(2000, state.year);
+    TEST_ASSERT_EQUAL_INT(1, state.month);
+    TEST_ASSERT_EQUAL_INT(1, state.day);
+}
+
 static void test_neighbor_median_and_top10(void) {
     int8_t values1[] = {-80, -40, -60};
     TEST_ASSERT_EQUAL_INT8(-60, bm_median_i8(values1, 3));
@@ -360,6 +394,7 @@ int main(void) {
     RUN_TEST(test_queue_monitor_hysteresis);
     RUN_TEST(test_time_codec);
     RUN_TEST(test_nmea_parser);
+    RUN_TEST(test_nmea_rmc_date_bounds);
     RUN_TEST(test_neighbor_median_and_top10);
     return UNITY_END();
 }
